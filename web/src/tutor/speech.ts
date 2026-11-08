@@ -205,56 +205,149 @@ export class SentenceStream {
   }
 }
 
-/** Queue of utterances with a speaking flag and a memory of recent words (for echo filtering). */
+export type TtsEngine = 'kokoro' | 'browser';
+
+interface Segment {
+  text: string;
+  /** Kokoro: WAV being synthesized on the server (requested as soon as the sentence arrives). */
+  audio?: Promise<Blob | null>;
+  ctrl?: AbortController;
+}
+
+/**
+ * Speaks sentences in order. Engine 'kokoro' = local neural voice from the PrepCoach server (natural);
+ * 'browser' = speechSynthesis (robotic, but instant). Kokoro failures fall back to the browser voice per sentence.
+ * Also remembers recent words for echo filtering.
+ */
 export class Speaker {
-  private pending = 0;
+  private queue: Segment[] = [];
+  private playing = false;
+  private epoch = 0;
+  private audioEl: HTMLAudioElement | null = null;
+  private active = false;
   private recent: { words: string[]; at: number }[] = [];
   private lastEnd = 0;
+  engine: TtsEngine = 'kokoro';
+  kokoroVoice = 'af_heart';
   voiceURI: string | null = null;
   rate = 1.05;
   enabled = true;
   onSpeakingChange: (speaking: boolean) => void = () => {};
+  onEngineError: (message: string | null) => void = () => {};
+  private blocked = false;
 
   get speaking() {
-    return this.pending > 0;
+    return this.active;
   }
 
   /** True while speaking or just after — when the mic may still be hearing us. */
   get echoWindow() {
-    return this.speaking || Date.now() - this.lastEnd < 1500;
+    return this.active || Date.now() - this.lastEnd < 1500;
   }
 
   speak(text: string) {
-    if (!this.enabled || !synthesisSupported || !text) return;
-    const u = new SpeechSynthesisUtterance(text);
-    const v = speechSynthesis.getVoices().find((x) => x.voiceURI === this.voiceURI) ?? defaultVoice();
-    if (v) {
-      u.voice = v;
-      u.lang = v.lang;
+    if (!this.enabled || !text) return;
+    const seg: Segment = { text };
+    if (this.engine === 'kokoro') {
+      seg.ctrl = new AbortController();
+      seg.audio = fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: this.kokoroVoice, speed: this.rate }),
+        signal: seg.ctrl.signal,
+      })
+        .then((r) => (r.ok ? r.blob() : null))
+        .catch(() => null);
     }
-    u.rate = this.rate;
     this.recent.push({ words: words(text), at: Date.now() });
     this.recent = this.recent.filter((r) => Date.now() - r.at < 60000);
-    this.pending++;
-    if (this.pending === 1) this.onSpeakingChange(true);
-    const done = () => {
-      this.pending = Math.max(0, this.pending - 1);
-      this.lastEnd = Date.now();
-      if (this.pending === 0) this.onSpeakingChange(false);
-    };
-    u.onend = done;
-    u.onerror = done;
-    speechSynthesis.speak(u);
+    this.queue.push(seg);
+    this.setActive(true);
+    void this.pump();
   }
 
   cancel() {
-    if (!synthesisSupported) return;
-    speechSynthesis.cancel();
-    if (this.pending) {
-      this.pending = 0;
-      this.lastEnd = Date.now();
-      this.onSpeakingChange(false);
+    this.epoch++;
+    for (const s of this.queue) s.ctrl?.abort();
+    this.queue = [];
+    if (this.audioEl) {
+      this.audioEl.pause();
+      this.audioEl = null;
     }
+    if (synthesisSupported) speechSynthesis.cancel();
+    this.playing = false;
+    if (this.active) this.lastEnd = Date.now();
+    this.setActive(false);
+  }
+
+  private async pump() {
+    if (this.playing) return;
+    const epoch = this.epoch;
+    this.playing = true;
+    while (this.queue.length && epoch === this.epoch) {
+      const seg = this.queue.shift()!;
+      const blob = seg.audio ? await seg.audio : null;
+      if (epoch !== this.epoch) return;
+      if (blob && blob.size > 44) {
+        await this.playBlob(blob, epoch);
+      } else {
+        if (seg.audio) this.onEngineError('Natural voice unavailable — using the browser voice.');
+        await this.browserSay(seg.text);
+      }
+    }
+    if (epoch !== this.epoch) return;
+    this.playing = false;
+    this.lastEnd = Date.now();
+    this.setActive(false);
+  }
+
+  private playBlob(blob: Blob, epoch: number): Promise<void> {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(blob);
+      const el = new Audio(url);
+      this.audioEl = el;
+      const done = () => {
+        URL.revokeObjectURL(url);
+        if (this.audioEl === el) this.audioEl = null;
+        resolve();
+      };
+      el.onended = done;
+      el.onerror = done;
+      el.onpause = () => epoch !== this.epoch && done();
+      el.play().then(
+        () => this.blocked && ((this.blocked = false), this.onEngineError(null)),
+        (e: Error) => {
+          // Autoplay policy: the page needs one click/keypress before it may play audio.
+          if (e?.name === 'NotAllowedError') {
+            this.blocked = true;
+            this.onEngineError('Click anywhere on the page to let the tutor speak.');
+          }
+          done();
+        },
+      );
+    });
+  }
+
+  private browserSay(text: string): Promise<void> {
+    if (!synthesisSupported) return Promise.resolve();
+    return new Promise((resolve) => {
+      const u = new SpeechSynthesisUtterance(text);
+      const v = speechSynthesis.getVoices().find((x) => x.voiceURI === this.voiceURI) ?? defaultVoice();
+      if (v) {
+        u.voice = v;
+        u.lang = v.lang;
+      }
+      u.rate = this.rate;
+      u.onend = () => resolve();
+      u.onerror = () => resolve();
+      speechSynthesis.speak(u);
+    });
+  }
+
+  private setActive(a: boolean) {
+    if (this.active === a) return;
+    this.active = a;
+    this.onSpeakingChange(a);
   }
 
   /** Is this transcript mostly the tutor's own voice coming back through the mic? */

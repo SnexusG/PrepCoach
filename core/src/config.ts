@@ -66,6 +66,10 @@ export interface TutorConfig {
   permissionMode: 'auto' | 'dontAsk' | 'acceptEdits';
   /** Always-allowed tools (permission rule syntax). */
   allowedTools: string[];
+  /** Spoken replies: 'kokoro' = local neural voice (default), 'browser' = the browser's built-in voices only. */
+  tts: 'kokoro' | 'browser';
+  /** Kokoro model precision; fp32 is fastest on desktop CPUs. */
+  ttsDtype: 'fp32' | 'q8' | 'q4';
 }
 
 export const DEFAULT_TUTOR_CONFIG: TutorConfig = {
@@ -73,6 +77,8 @@ export const DEFAULT_TUTOR_CONFIG: TutorConfig = {
   model: null,
   permissionMode: 'auto',
   allowedTools: ['Bash(npx prep:*)', 'Read', 'Glob', 'Grep', 'Edit(problems/**)', 'Write(problems/**)'],
+  tts: 'kokoro',
+  ttsDtype: 'fp32',
 };
 
 export function tutorConfig(cfg: PrepConfig): TutorConfig {

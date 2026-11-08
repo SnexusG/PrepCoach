@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Listener, recognitionSupported, SentenceStream, Speaker, synthesisSupported } from './speech';
+import { Listener, recognitionSupported, SentenceStream, Speaker, synthesisSupported, type TtsEngine } from './speech';
 
 export type TutorState = 'stopped' | 'starting' | 'idle' | 'thinking';
 
@@ -16,12 +16,15 @@ export interface TranscriptEntry {
 
 export interface VoiceSettings {
   voiceOut: boolean;
+  /** kokoro = natural local neural voice; browser = built-in (robotic) voices. */
+  engine: TtsEngine;
+  kokoroVoice: string;
   voiceURI: string | null;
   rate: number;
   pauseMs: number;
 }
 
-const DEFAULT_SETTINGS: VoiceSettings = { voiceOut: true, voiceURI: null, rate: 1.05, pauseMs: 1800 };
+const DEFAULT_SETTINGS: VoiceSettings = { voiceOut: true, engine: 'kokoro', kokoroVoice: 'af_heart', voiceURI: null, rate: 1.05, pauseMs: 1800 };
 
 interface TutorApi {
   connected: boolean;
@@ -31,12 +34,14 @@ interface TutorApi {
   listening: boolean;
   speaking: boolean;
   micError: string | null;
+  voiceError: string | null;
   settings: VoiceSettings;
   recognitionSupported: boolean;
   synthesisSupported: boolean;
   send(text: string): void;
   toggleMic(): void;
   stopSpeaking(): void;
+  preview(text: string): void;
   interrupt(): void;
   reset(): void;
   updateSettings(p: Partial<VoiceSettings>): void;
@@ -80,6 +85,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [settings, setSettings] = useState<VoiceSettings>(loadSettings);
 
   const navigate = useNavigate();
@@ -134,7 +140,10 @@ export function TutorProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     speaker.onSpeakingChange = setSpeaking;
+    speaker.onEngineError = setVoiceError;
     speaker.enabled = settings.voiceOut;
+    speaker.engine = settings.engine;
+    speaker.kokoroVoice = settings.kokoroVoice;
     speaker.voiceURI = settings.voiceURI;
     speaker.rate = settings.rate;
     listener.pauseMs = settings.pauseMs;
@@ -204,12 +213,17 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     listening,
     speaking,
     micError,
+    voiceError,
     settings,
     recognitionSupported,
     synthesisSupported,
     send,
     toggleMic: () => (listener.active ? listener.stop() : listener.start()),
     stopSpeaking: hush,
+    preview: (text) => {
+      hush();
+      speaker.speak(text);
+    },
     interrupt: () => {
       hush();
       void post('/api/tutor/interrupt');
@@ -218,7 +232,10 @@ export function TutorProvider({ children }: { children: ReactNode }) {
       hush();
       void post('/api/tutor/reset');
     },
-    updateSettings: (p) => setSettings((s) => ({ ...s, ...p })),
+    updateSettings: (p) => {
+      setVoiceError(null);
+      setSettings((s) => ({ ...s, ...p }));
+    },
   };
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;

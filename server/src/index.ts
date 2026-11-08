@@ -14,6 +14,7 @@ import {
   type AttemptRow,
 } from '@prepcoach/core';
 import { TutorBridge, type TutorEvent } from './tutor';
+import { Tts } from './tts';
 
 // The server only reads state and runs tests through the shared core library — the same code the CLI uses.
 const cfg = loadConfig();
@@ -200,6 +201,27 @@ app.get('/api/current', (_req, res) => {
     .get() as { slug: string } | undefined;
   res.json({ slug: r?.slug ?? null });
 });
+
+// ---------------- neural text-to-speech (Kokoro, local) ----------------
+const tts = new Tts(path.join(paths.root, 'data', 'models'), tutorConfig(cfg).ttsDtype);
+// Warm the model in the background so the first reply isn't delayed (first run downloads it).
+if (tutorConfig(cfg).tts === 'kokoro') tts.load().catch((e) => console.error('Kokoro TTS failed to load:', e.message));
+
+app.get('/api/tts/status', (_req, res) => res.json(tts.status()));
+
+app.post(
+  '/api/tts',
+  wrap(async (req, res) => {
+    const { text, voice, speed } = req.body ?? {};
+    if (typeof text !== 'string' || !text.trim()) throw httpError(400, 'Body must include "text"');
+    if (text.length > 1000) throw httpError(400, 'Text too long — send one sentence at a time');
+    let gone = false;
+    res.on('close', () => (gone = !res.writableFinished));
+    const wav = await tts.synthesize(text.trim(), String(voice ?? ''), Number(speed ?? 1), () => gone);
+    if (!wav || gone) return void res.end();
+    res.set({ 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' }).send(wav);
+  }),
+);
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {

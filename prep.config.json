@@ -75,6 +75,8 @@
   "tutor": {
     "model": null,
     "permissionMode": "auto",
-    "allowedTools": ["Bash(npx prep:*)", "Read", "Glob", "Grep", "Edit(problems/**)", "Write(problems/**)"]
+    "allowedTools": ["Bash(npx prep:*)", "Read", "Glob", "Grep", "Edit(problems/**)", "Write(problems/**)"],
+    "tts": "kokoro",
+    "ttsDtype": "fp32"
   }
 }

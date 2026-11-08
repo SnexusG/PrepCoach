@@ -34,6 +34,26 @@ function Settings({ onClose }: { onClose: () => void }) {
     return () => speechSynthesis.removeEventListener('voiceschanged', h);
   }, [t.synthesisSupported]);
 
+  // Natural (Kokoro) voice list + model state from the server.
+  const [tts, setTts] = useState<{ state: string; error: string | null; voices: { id: string; label: string }[] } | null>(null);
+  useEffect(() => {
+    let stop = false;
+    const poll = () =>
+      fetch('/api/tts/status')
+        .then((r) => r.json())
+        .then((s) => {
+          if (stop) return;
+          setTts(s);
+          if (s.state === 'loading') setTimeout(poll, 2000);
+        })
+        .catch(() => {});
+    poll();
+    return () => {
+      stop = true;
+    };
+  }, []);
+
+  const kokoro = t.settings.engine === 'kokoro';
   return (
     <div className="t-settings">
       <label>
@@ -41,16 +61,43 @@ function Settings({ onClose }: { onClose: () => void }) {
         Read replies aloud
       </label>
       <label>
-        Voice
-        <select value={t.settings.voiceURI ?? ''} onChange={(e) => t.updateSettings({ voiceURI: e.target.value || null })}>
-          <option value="">Auto (best available)</option>
-          {voices.map((v) => (
-            <option key={v.voiceURI} value={v.voiceURI}>
-              {v.name}
-            </option>
-          ))}
+        Engine
+        <select value={t.settings.engine} onChange={(e) => t.updateSettings({ engine: e.target.value as 'kokoro' | 'browser' })}>
+          <option value="kokoro">Natural — Kokoro (local neural voice)</option>
+          <option value="browser">Browser built-in (instant, robotic)</option>
         </select>
       </label>
+      {kokoro ? (
+        <label>
+          Voice
+          <select value={t.settings.kokoroVoice} onChange={(e) => t.updateSettings({ kokoroVoice: e.target.value })}>
+            {(tts?.voices ?? [{ id: 'af_heart', label: 'Heart (US, female)' }]).map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+          {tts?.state === 'loading' && <span className="muted small">loading model…</span>}
+          {tts?.state === 'error' && <span className="t-warn small" title={tts.error ?? ''}>model failed — using browser voice</span>}
+        </label>
+      ) : (
+        <label>
+          Voice
+          <select value={t.settings.voiceURI ?? ''} onChange={(e) => t.updateSettings({ voiceURI: e.target.value || null })}>
+            <option value="">Auto (best available)</option>
+            {voices.map((v) => (
+              <option key={v.voiceURI} value={v.voiceURI}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div className="t-settings-row">
+        <button onClick={() => t.preview("Hi! Walk me through your approach, and tell me the time and space complexity before you start coding.")}>
+          ▶ Preview voice
+        </button>
+      </div>
       <label>
         Speed {t.settings.rate.toFixed(2)}×
         <input type="range" min={0.8} max={1.5} step={0.05} value={t.settings.rate} onChange={(e) => t.updateSettings({ rate: +e.target.value })} />
@@ -129,6 +176,7 @@ export default function TutorPanel() {
 
       {showSettings && <Settings onClose={() => setShowSettings(false)} />}
       {t.micError && <div className="t-error">{t.micError}</div>}
+      {t.voiceError && <div className="t-error">{t.voiceError}</div>}
 
       <div className="t-list" ref={listRef}>
         {t.entries.length === 0 && (

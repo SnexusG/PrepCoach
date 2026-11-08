@@ -263,3 +263,5 @@ button.mic.on { background: #4a2323; border-color: var(--fail); }
   .left-col { max-height: 55vh; border-right: none; border-bottom: 1px solid var(--border); }
   .home-grid { grid-template-columns: 1fr; }
 }
+
+.t-warn { color: var(--warn); }

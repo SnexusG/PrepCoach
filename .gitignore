@@ -10,3 +10,4 @@ problems/*/.results.json
 *.log
 .DS_Store
 data/tutor/
+data/models/
