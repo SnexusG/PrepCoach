@@ -63,7 +63,7 @@ export const REPO_ROOT = process.env.PREP_ROOT
 export const paths = {
   root: REPO_ROOT,
   config: path.join(REPO_ROOT, 'prep.config.json'),
-  db: path.join(REPO_ROOT, 'data', 'prep.db'),
+  db: process.env.PREP_DB ? path.resolve(process.env.PREP_DB) : path.join(REPO_ROOT, 'data', 'prep.db'),
   sheets: path.join(REPO_ROOT, 'data', 'sheets'),
   backups: path.join(REPO_ROOT, 'data', 'backups'),
   problems: path.join(REPO_ROOT, 'problems'),
