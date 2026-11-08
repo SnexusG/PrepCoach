@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { Command, Option } from 'commander';
 import {
+  checkJava,
+  tutorConfig,
   DIFFICULTIES,
   abandonAttempt,
   activeSession,
@@ -497,6 +500,57 @@ program
     fs.mkdirSync(paths.backups, { recursive: true });
     await db().backup(file);
     out({ file }, () => `Backed up to ${rel(file)}`);
+  });
+
+// ---------------- doctor ----------------
+program
+  .command('doctor')
+  .description('check prerequisites: Node, JDK (javac/java 17+), the claude CLI, the database and the voice model')
+  .action(async () => {
+    const checks: { name: string; ok: boolean; detail: string; fix?: string }[] = [];
+    const nodeMajor = Number(process.versions.node.split('.')[0]);
+    checks.push({ name: 'Node.js', ok: nodeMajor >= 20, detail: `v${process.versions.node}`, fix: 'Install Node.js 20 or newer' });
+
+    const java = await checkJava();
+    const javaMajor = Number(/(?:javac\s+)?(\d+)(?:\.\d+)*/.exec(java.version ?? '')?.[1] ?? 0);
+    checks.push({
+      name: 'JDK (javac)',
+      ok: java.ok && javaMajor >= 17,
+      detail: java.ok ? java.version! : 'not found',
+      fix: 'Install a JDK 17+ and put it on PATH (or set JAVA_HOME)',
+    });
+
+    const tc = tutorConfig(cfg);
+    const claudeBin = process.env.PREP_CLAUDE_BIN || tc.claudeBin;
+    try {
+      const v = execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 15000, windowsHide: true }).trim();
+      checks.push({ name: 'Claude Code CLI', ok: true, detail: v });
+    } catch {
+      checks.push({ name: 'Claude Code CLI', ok: false, detail: `"${claudeBin}" not found`, fix: 'Install Claude Code and run `claude` once to log in (needed for the voice tutor)' });
+    }
+
+    const dbExists = fs.existsSync(paths.db);
+    let dbDetail = dbExists ? rel(paths.db) : 'missing';
+    if (dbExists) {
+      const n = (db().prepare('SELECT COUNT(*) AS n FROM problems').get() as { n: number }).n;
+      dbDetail += ` · ${n} problems in catalog`;
+    }
+    checks.push({ name: 'Database', ok: dbExists, detail: dbDetail, fix: 'Run `npx prep init`' });
+
+    const modelDir = path.join(paths.root, 'data', 'models', 'onnx-community', 'Kokoro-82M-v1.0-ONNX');
+    const cached = fs.existsSync(modelDir);
+    checks.push({
+      name: 'Voice model (Kokoro)',
+      ok: true,
+      detail: tc.tts === 'browser' ? 'disabled (tutor.tts = "browser")' : cached ? 'cached in data/models/' : 'not downloaded yet — fetched automatically (~310 MB) on first `npm run dev`',
+    });
+
+    out({ ok: checks.every((c) => c.ok), checks }, () => [
+      ...checks.map((c) => `${c.ok ? '✓' : '✗'} ${c.name.padEnd(22)} ${c.detail}${!c.ok && c.fix ? `\n    → ${c.fix}` : ''}`),
+      '',
+      checks.every((c) => c.ok) ? 'All good — start with `npm run dev`.' : 'Fix the ✗ items above, then run `npx prep doctor` again.',
+    ]);
+    if (!checks.every((c) => c.ok)) process.exitCode = 1;
   });
 
 // ---------------- ref-clean ----------------

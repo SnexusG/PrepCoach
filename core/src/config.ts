@@ -117,6 +117,14 @@ export function validateConfig(cfg: PrepConfig): void {
   if (cfg.spacedRepetition.lowThreshold > cfg.spacedRepetition.highThreshold) {
     errors.push('spacedRepetition.lowThreshold must be <= highThreshold');
   }
+  const t = cfg.tutor ?? {};
+  if (t.permissionMode && !['auto', 'dontAsk', 'acceptEdits'].includes(t.permissionMode)) {
+    errors.push('tutor.permissionMode must be "auto", "dontAsk" or "acceptEdits"');
+  }
+  if (t.tts && !['kokoro', 'browser'].includes(t.tts)) errors.push('tutor.tts must be "kokoro" or "browser"');
+  if (t.ttsDtype && !['fp32', 'q8', 'q4'].includes(t.ttsDtype)) errors.push('tutor.ttsDtype must be "fp32", "q8" or "q4"');
+  if (t.allowedTools && !Array.isArray(t.allowedTools)) errors.push('tutor.allowedTools must be an array of permission rules');
+  if (cfg.ports.web === cfg.ports.api) errors.push('ports.web and ports.api must differ');
   if (errors.length) throw new Error(`Invalid prep.config.json:\n  - ${errors.join('\n  - ')}`);
 }
 
