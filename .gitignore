@@ -9,3 +9,4 @@ problems/*/.results.json
 .private/
 *.log
 .DS_Store
+data/tutor/

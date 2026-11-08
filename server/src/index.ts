@@ -10,8 +10,10 @@ import {
   problemFiles,
   readLastResults,
   runProblemTests,
+  tutorConfig,
   type AttemptRow,
 } from '@prepcoach/core';
+import { TutorBridge, type TutorEvent } from './tutor';
 
 // The server only reads state and runs tests through the shared core library — the same code the CLI uses.
 const cfg = loadConfig();
@@ -155,6 +157,57 @@ app.post(
     }
   }),
 );
+
+// ---------------- voice tutor (headless Claude Code) ----------------
+const tutor = new TutorBridge(tutorConfig(cfg), paths.root, path.join(paths.root, 'data', 'tutor'));
+
+/** Server-sent events: a snapshot on connect, then every tutor event. */
+app.get('/api/tutor/events', (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  const send = (e: unknown) => res.write(`data: ${JSON.stringify(e)}\n\n`);
+  send({ type: 'snapshot', ...tutor.snapshot() });
+  const onEvent = (e: TutorEvent) => send(e);
+  tutor.on('event', onEvent);
+  const ping = setInterval(() => res.write(': ping\n\n'), 20000);
+  req.on('close', () => {
+    clearInterval(ping);
+    tutor.off('event', onEvent);
+  });
+});
+
+app.post('/api/tutor/message', (req, res) => {
+  const { text, clientId } = req.body ?? {};
+  if (typeof text !== 'string' || !text.trim()) throw httpError(400, 'Body must include "text"');
+  if (text.length > 8000) throw httpError(400, 'Message too long');
+  tutor.send(text, typeof clientId === 'string' ? clientId : undefined);
+  res.json({ ok: true });
+});
+
+app.post('/api/tutor/interrupt', (_req, res) => {
+  tutor.interrupt();
+  res.json({ ok: true });
+});
+
+app.post('/api/tutor/reset', (_req, res) => {
+  tutor.reset();
+  res.json({ ok: true });
+});
+
+/** The problem with an in-progress attempt, if any (the voice UI opens it). */
+app.get('/api/current', (_req, res) => {
+  const r = db
+    .prepare(`SELECT problem_slug AS slug FROM attempts WHERE status = 'in_progress' ORDER BY id DESC LIMIT 1`)
+    .get() as { slug: string } | undefined;
+  res.json({ slug: r?.slug ?? null });
+});
+
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    tutor.kill();
+    process.exit(0);
+  });
+}
+process.on('exit', () => tutor.kill());
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 

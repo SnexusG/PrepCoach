@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { Command, Option } from 'commander';
 import {
@@ -496,6 +497,17 @@ program
     fs.mkdirSync(paths.backups, { recursive: true });
     await db().backup(file);
     out({ file }, () => `Backed up to ${rel(file)}`);
+  });
+
+// ---------------- ref-clean ----------------
+program
+  .command('ref-clean')
+  .description('delete private reference solutions (the OS temp dir prepcoach-ref/, used to verify generated tests)')
+  .action(() => {
+    const dir = path.join(os.tmpdir(), 'prepcoach-ref');
+    const existed = fs.existsSync(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    out({ dir, deleted: existed }, () => (existed ? `Deleted ${dir}` : `Nothing to delete (${dir})`));
   });
 
 try {

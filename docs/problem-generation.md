@@ -14,7 +14,8 @@ Generate a problem's files the first time it is served (`prep next` / `prep star
 5. Write **`tests.json`** — 10–20 cases incl. edge cases: empty input, single element, duplicates, negatives,
    boundaries, and one max-constraint case. Generate big/random cases and their expected values with a script.
 6. **Verify privately:** write a reference solution **outside the repo** (e.g. `%TEMP%/prepcoach-ref/<slug>.java`),
-   run `npx prep run-tests <slug> --solution <that file>`, fix tests until all pass, then delete the reference.
+   run `npx prep run-tests <slug> --solution <that file>`, fix tests until all pass, then delete it with
+   `npx prep ref-clean` (removes `<OS temp>/prepcoach-ref/`).
    Never show the reference to the user and never save it under the repo.
 7. Sanity-check that the stub compiles: `npx prep run-tests <slug>` should run (and fail) without a compile error.
 

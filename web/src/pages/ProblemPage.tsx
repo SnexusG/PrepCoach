@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import { api, ApiError, type Attempt, type Meta, type ProblemData, type RunResult } from '../api';
 import ResultsPanel from '../components/ResultsPanel';
+import TutorPanel from '../components/TutorPanel';
 
 type MonacoEditor = Parameters<OnMount>[0];
 type Monaco = Parameters<OnMount>[1];
@@ -293,13 +294,16 @@ export default function ProblemPage() {
         </div>
       ) : (
         <div className="split">
-          <section className="statement">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{ a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" /> }}
-            >
-              {data.statement ?? ''}
-            </ReactMarkdown>
+          <section className="left-col">
+            <div className="statement">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{ a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" /> }}
+              >
+                {data.statement ?? ''}
+              </ReactMarkdown>
+            </div>
+            <TutorPanel />
           </section>
 
           <section className="workbench">

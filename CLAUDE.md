@@ -11,6 +11,12 @@ Tracks: **DSA** (live), System Design and Java Fundamentals (coming soon, see th
 Before anything else, run `npx prep context` and read it. It holds the user's ratings, active weaknesses
 (with examples), unfinished/abandoned problems, recent attempts and due reviews. Use it all session.
 
+## Voice mode (web app)
+The web app (`npm run dev`, http://localhost:5173) runs this same tutor headless (`claude -p`, see
+`server/src/tutor.ts`) and turns it into a spoken conversation: the browser transcribes the user and reads your
+replies aloud. When the system prompt contains **VOICE MODE**, follow it — short spoken turns, no markdown in
+speech, never read the statement aloud (it's on screen). Every rule below still applies.
+
 ## Hard rules
 1. **All state changes go through `npx prep …`.** Never write to `data/prep.db`, never compute ratings or
    rating deltas yourself — report the numbers the CLI prints.

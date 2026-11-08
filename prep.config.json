@@ -71,5 +71,10 @@
   "runner": {
     "perTestTimeoutMs": 2000
   },
-  "ports": { "web": 5173, "api": 5175 }
+  "ports": { "web": 5173, "api": 5175 },
+  "tutor": {
+    "model": null,
+    "permissionMode": "auto",
+    "allowedTools": ["Bash(npx prep:*)", "Read", "Glob", "Grep", "Edit(problems/**)", "Write(problems/**)"]
+  }
 }

@@ -53,6 +53,30 @@ export interface PrepConfig {
   weaknesses: { cleanDemonstrationsToResolve: number };
   runner: { perTestTimeoutMs: number };
   ports: { web: number; api: number };
+  /** Voice tutor: the web server drives a headless Claude Code session (`claude -p`). Optional; defaults below. */
+  tutor?: Partial<TutorConfig>;
+}
+
+export interface TutorConfig {
+  /** Path to the claude executable (default: `claude` on PATH, or the PREP_CLAUDE_BIN env var). */
+  claudeBin: string;
+  /** Model alias passed as --model; null = your Claude Code default. */
+  model: string | null;
+  /** Headless sessions can't show permission prompts: auto = classifier decides, dontAsk = allowlist only. */
+  permissionMode: 'auto' | 'dontAsk' | 'acceptEdits';
+  /** Always-allowed tools (permission rule syntax). */
+  allowedTools: string[];
+}
+
+export const DEFAULT_TUTOR_CONFIG: TutorConfig = {
+  claudeBin: 'claude',
+  model: null,
+  permissionMode: 'auto',
+  allowedTools: ['Bash(npx prep:*)', 'Read', 'Glob', 'Grep', 'Edit(problems/**)', 'Write(problems/**)'],
+};
+
+export function tutorConfig(cfg: PrepConfig): TutorConfig {
+  return { ...DEFAULT_TUTOR_CONFIG, ...(cfg.tutor ?? {}) };
 }
 
 /** Repo root: PREP_ROOT env var, else two levels up from core/src. */
