@@ -76,22 +76,6 @@ button:disabled { opacity: 0.6; cursor: default; }
 .banner.warn { background: #3a3220; border: 1px solid var(--warn); }
 .banner.error { background: #3a2222; border: 1px solid var(--fail); }
 
-/* ---------- home ---------- */
-.home { display: flex; flex-direction: column; height: 100%; }
-.home-grid {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 16px;
-  padding: 16px;
-  max-width: 1200px;
-  width: 100%;
-  margin: 0 auto;
-}
-.home-grid .tutor { border: 1px solid var(--border); border-radius: 8px; }
-.home-side { overflow: auto; }
-.home-side h2 { font-size: 15px; margin: 4px 0 8px; }
 .small { font-size: 12px; }
 .problem-list { list-style: none; padding: 0; }
 .problem-list li {
@@ -261,7 +245,6 @@ button.mic.on { background: #4a2323; border-color: var(--fail); }
 @media (max-width: 900px) {
   .split { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .left-col { max-height: 55vh; border-right: none; border-bottom: 1px solid var(--border); }
-  .home-grid { grid-template-columns: 1fr; }
 }
 
 .t-warn { color: var(--warn); }

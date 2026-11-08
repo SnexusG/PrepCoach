@@ -470,3 +470,56 @@ export function renderContextMarkdown(c: ContextData): string {
   }
   return L.join('\n');
 }
+
+// ---------- attempt detail (history page) ----------
+
+export interface AttemptDetail extends AttemptSummary {
+  rubric: {
+    input?: Record<string, number>;
+    components?: Record<string, number>;
+    raw?: number;
+    cap?: number;
+  } | null;
+  ratingChanges: { topic: string; isPrimary: boolean; ratingBefore: number; ratingAfter: number; expected: number; k: number; weight: number }[];
+  hints: { level: number; givenAt: string }[];
+  weaknesses: { id: number; description: string; topic: string | null; status: string; kind: 'observed' | 'handled_well' }[];
+}
+
+export function attemptDetail(db: DB, id: number): AttemptDetail {
+  const summary = db
+    .prepare(
+      `SELECT a.id, a.problem_slug AS slug, p.title, t.name AS topic, p.difficulty, a.status, a.is_review AS isReview,
+              a.started_at AS startedAt, a.finished_at AS finishedAt, a.solve_time_sec AS solveTimeSec,
+              a.hints_used AS hintsUsed, a.tests_passed AS testsPassed, a.tests_total AS testsTotal,
+              a.outcome_score AS outcomeScore, a.tutor_summary AS tutorSummary, a.session_id AS sessionId, a.rubric,
+              (SELECT c.rating_after - c.rating_before FROM attempt_rating_changes c
+                 WHERE c.attempt_id = a.id AND c.is_primary = 1) AS ratingDelta
+       FROM attempts a JOIN problems p ON p.slug = a.problem_slug JOIN topics t ON t.id = p.topic_id WHERE a.id = ?`,
+    )
+    .get(id) as any;
+  if (!summary) throw new Error(`Attempt #${id} not found`);
+  const ratingChanges = (
+    db
+      .prepare(
+        `SELECT t.name AS topic, c.is_primary AS isPrimary, c.rating_before AS ratingBefore, c.rating_after AS ratingAfter,
+                c.expected, c.k, c.weight
+         FROM attempt_rating_changes c JOIN topics t ON t.id = c.topic_id WHERE c.attempt_id = ? ORDER BY c.is_primary DESC`,
+      )
+      .all(id) as any[]
+  ).map((r) => ({ ...r, isPrimary: !!r.isPrimary }));
+  const hints = db.prepare('SELECT level, given_at AS givenAt FROM hint_log WHERE attempt_id = ? ORDER BY level').all(id) as AttemptDetail['hints'];
+  const weaknesses = db
+    .prepare(
+      `SELECT w.id, w.description, t.name AS topic, w.status, wa.kind
+       FROM weakness_attempts wa JOIN weaknesses w ON w.id = wa.weakness_id LEFT JOIN topics t ON t.id = w.topic_id
+       WHERE wa.attempt_id = ? ORDER BY wa.kind, w.id`,
+    )
+    .all(id) as AttemptDetail['weaknesses'];
+  let rubric: AttemptDetail['rubric'] = null;
+  try {
+    rubric = summary.rubric ? JSON.parse(summary.rubric) : null;
+  } catch {
+    rubric = null;
+  }
+  return { ...summary, isReview: !!summary.isReview, rubric, ratingChanges, hints, weaknesses };
+}

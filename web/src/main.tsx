@@ -9,6 +9,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { TutorProvider } from './tutor/TutorContext';
 import './styles.css';
+import './dashboard.css';
 
 // Bundle Monaco locally (the default loader pulls it from a CDN; PrepCoach runs fully offline).
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };

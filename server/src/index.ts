@@ -2,6 +2,13 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  activeSession,
+  attemptDetail,
+  confidenceWeight,
+  getStats,
+  listAttempts,
+  listReviews,
+  weaknessesWithExamples,
   getOpenAttempt,
   getProblem,
   loadConfig,
@@ -158,6 +165,44 @@ app.post(
     }
   }),
 );
+
+// ---------------- dashboard & history ----------------
+
+/** Everything the dashboard shows, in one call (cheap: a handful of indexed SQLite queries). */
+app.get('/api/dashboard', (_req, res) => {
+  const stats = getStats(db, cfg);
+  const tracks = db.prepare('SELECT id, name, enabled FROM tracks ORDER BY rowid').all() as { id: string; name: string; enabled: number }[];
+  res.json({
+    stats: {
+      ...stats,
+      topics: stats.topics.map((t) => ({ ...t, confidence: Math.round(confidenceWeight(t.attempts, cfg) * 100) / 100 })),
+    },
+    initialRating: cfg.rating.initial,
+    labels: cfg.rating.labels,
+    weaknesses: weaknessesWithExamples(db, stats.track, ['active', 'improving']),
+    reviews: listReviews(db, new Date(), { withinDays: 7 }),
+    recent: listAttempts(db, { track: stats.track, limit: 8 }),
+    session: activeSession(db) ?? null,
+    tracks: tracks.map((t) => ({ ...t, enabled: !!t.enabled })),
+  });
+});
+
+app.get('/api/attempts', (_req, res) => {
+  res.json(listAttempts(db, { track: 'dsa' }));
+});
+
+app.get('/api/attempts/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) throw httpError(400, 'Invalid attempt id');
+  let detail;
+  try {
+    detail = attemptDetail(db, id);
+  } catch {
+    throw httpError(404, `Attempt #${id} not found`);
+  }
+  const files = problemFiles(detail.slug);
+  res.json({ ...detail, notes: readIf(files.notes), solution: readIf(files.solution) });
+});
 
 // ---------------- voice tutor (headless Claude Code) ----------------
 const tutor = new TutorBridge(tutorConfig(cfg), paths.root, path.join(paths.root, 'data', 'tutor'));

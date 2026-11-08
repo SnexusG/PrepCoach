@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { Link, useParams } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import { api, ApiError, type Attempt, type Meta, type ProblemData, type RunResult } from '../api';
+import NavBar from '../components/NavBar';
 import ResultsPanel from '../components/ResultsPanel';
 import TutorPanel from '../components/TutorPanel';
 
@@ -277,8 +278,7 @@ export default function ProblemPage() {
 
   return (
     <div className="problem-page">
-      <header className="topbar">
-        <Link to="/" className="brand">PrepCoach</Link>
+      <NavBar>
         <h1>{problem.title}</h1>
         <span className={`badge ${problem.difficulty}`}>{problem.difficulty}</span>
         <span className="muted topic">{[problem.topic, ...problem.secondaryTopics].join(' · ')}</span>
@@ -286,7 +286,7 @@ export default function ProblemPage() {
         <span className="spacer" />
         <HintPill attempt={attempt} meta={meta} />
         <Timer attempt={attempt} />
-      </header>
+      </NavBar>
 
       {!data.generated ? (
         <div className="page-msg">

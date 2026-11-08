@@ -35,6 +35,8 @@ interface TutorApi {
   speaking: boolean;
   micError: string | null;
   voiceError: string | null;
+  /** Increments after every completed tutor turn — pages refetch on it (an attempt may have been recorded). */
+  turns: number;
   settings: VoiceSettings;
   recognitionSupported: boolean;
   synthesisSupported: boolean;
@@ -87,6 +89,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
   const [speaking, setSpeaking] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [turns, setTurns] = useState(0);
   const [settings, setSettings] = useState<VoiceSettings>(loadSettings);
 
   const navigate = useNavigate();
@@ -202,6 +205,9 @@ export function TutorProvider({ children }: { children: ReactNode }) {
           setEntries((xs) => xs.map((x) => (x.id === e.id ? { ...x, streaming: false, interrupted: e.interrupted } : x)));
           break;
         }
+        case 'turn_end':
+          setTurns((n) => n + 1);
+          break;
         case 'navigate':
           if (locationRef.current !== `/problem/${e.slug}`) navigate(`/problem/${e.slug}`);
           break;
@@ -219,6 +225,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     speaking,
     micError,
     voiceError,
+    turns,
     settings,
     recognitionSupported,
     synthesisSupported,
