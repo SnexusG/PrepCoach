@@ -122,14 +122,45 @@ export function problemFiles(slug: string) {
   return { ...files, generated };
 }
 
-/** Set secondary topic tags and/or a custom difficulty rating for a problem. */
+export interface ProblemMeta {
+  secondaryTopics?: string[];
+  difficultyRating?: number;
+}
+
+/** problems/<slug>/meta.json: repo-persisted tags so a DB rebuild keeps them. */
+export function readProblemMeta(slug: string): ProblemMeta | null {
+  const file = path.join(paths.problems, slug, 'meta.json');
+  return fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as ProblemMeta) : null;
+}
+
+/** Re-applies every problems/<slug>/meta.json to the DB (run by `prep init`). Returns how many were applied. */
+export function applyAllProblemMeta(db: DB, dir = paths.problems): number {
+  if (!fs.existsSync(dir)) return 0;
+  let n = 0;
+  for (const slug of fs.readdirSync(dir)) {
+    const meta = readProblemMeta(slug);
+    if (!meta || !db.prepare('SELECT 1 FROM problems WHERE slug = ?').get(slug)) continue;
+    tagProblem(db, slug, meta, { persist: false });
+    n++;
+  }
+  return n;
+}
+
+/** Set secondary topic tags and/or a custom difficulty rating for a problem (also saved to meta.json). */
 export function tagProblem(
   db: DB,
   slug: string,
-  opts: { secondaryTopics?: string[]; difficultyRating?: number },
+  opts: ProblemMeta,
+  { persist = true }: { persist?: boolean } = {},
 ): void {
   const row = db.prepare('SELECT track FROM problems WHERE slug = ?').get(slug) as { track: Track } | undefined;
   if (!row) throw new Error(`Unknown problem: "${slug}"`);
+  if (persist) {
+    const meta = { ...(readProblemMeta(slug) ?? {}), ...opts };
+    const dir = path.join(paths.problems, slug);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2) + '\n');
+  }
   if (opts.secondaryTopics) {
     const names = opts.secondaryTopics.map((t) => {
       const id = topicId(db, row.track, t);

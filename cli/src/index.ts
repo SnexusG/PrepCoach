@@ -13,6 +13,7 @@ import {
   getStats,
   hintCap,
   importSheet,
+  applyAllProblemMeta,
   isReviewDue,
   listAttempts,
   listReviews,
@@ -87,6 +88,27 @@ function parseObjectArg(raw: string, what: string): any {
   return obj;
 }
 
+const collect = (v: string, prev: string[]) => [...prev, v];
+
+/** Builds weakness observations from --weaknesses JSON plus the shell-safe flags. */
+function weaknessObservations(o: { weaknesses?: string; weakness?: string[]; seen?: string[]; handled?: string[] }): WeaknessObservation[] {
+  const obs: WeaknessObservation[] = [];
+  if (o.weaknesses) {
+    const parsed = parseObjectArg(o.weaknesses, '--weaknesses');
+    if (!Array.isArray(parsed)) throw new Error('--weaknesses must be a JSON array');
+    obs.push(...parsed);
+  }
+  for (const w of o.weakness ?? []) {
+    const idx = w.indexOf('::');
+    if (idx < 0) throw new Error(`--weakness "${w}" must look like "Topic :: description" (use "general :: …" for topic-less)`);
+    const topic = w.slice(0, idx).trim();
+    obs.push({ description: w.slice(idx + 2).trim(), topic: /^general$/i.test(topic) ? null : topic, kind: 'observed' });
+  }
+  for (const id of o.seen ?? []) obs.push({ id: Number(id), kind: 'observed' });
+  for (const id of o.handled ?? []) obs.push({ id: Number(id), kind: 'handled_well' });
+  return obs;
+}
+
 const parseDifficulty = (v: string): Difficulty => {
   const d = v.toLowerCase() as Difficulty;
   if (!DIFFICULTIES.includes(d)) throw new Error(`Difficulty must be one of ${DIFFICULTIES.join(', ')}`);
@@ -108,11 +130,13 @@ program
       const sheet = loadSheet(id);
       return { id, name: sheet.name, verified: sheet.verified, count: sheet.problems.length, ...importSheet(d, cfg, sheet) };
     });
-    out({ db: paths.db, sheets: results }, () => [
+    const metaApplied = applyAllProblemMeta(d);
+    out({ db: paths.db, sheets: results, metaApplied }, () => [
       `Database ready: ${rel(paths.db)}`,
       ...results.map(
         (r) => `Sheet ${r.id} (${r.name}): ${r.count} problems — ${r.inserted} new, ${r.updated} updated${r.verified ? '' : ' — UNVERIFIED'}`,
       ),
+      `Applied problem meta (tags/ratings) for ${metaApplied} problem(s).`,
     ]);
   });
 
@@ -194,10 +218,12 @@ program
 
 // ---------------- hint ----------------
 program
-  .command('hint <slug> <level>')
-  .description('log a hint level (1 nudge, 2 pattern, 3 approach, 4 full solution)')
+  .command('hint <slug> [level]')
+  .description('log a hint level (1 nudge, 2 pattern, 3 approach, 4 full solution); without a level, just show the current level and the cost of the next')
   .action((slug, level) => {
-    const lvl = recordHint(db(), cfg, slug, Number(level));
+    const open = getOpenAttempt(db(), slug);
+    if (!open) throw new Error(`No attempt in progress for "${slug}".`);
+    const lvl = level === undefined ? open.hintsUsed : recordHint(db(), cfg, slug, Number(level));
     const names = cfg.rating.hintNames;
     const next = lvl < names.length - 1 ? lvl + 1 : null;
     const data = {
@@ -263,6 +289,9 @@ program
   .requiredOption('--rubric <json>', 'optimality, approach, codeQuality, communication [, independence, correctness] in 0..1 (JSON, @file, or k=v,k=v)')
   .option('--hints <n>', 'hint level used (defaults to the logged level)', Number)
   .option('--weaknesses <json>', 'JSON array of {id?|description, topic?, kind?: observed|handled_well}')
+  .option('--weakness <"Topic :: description">', 'new or re-observed weakness by description (repeatable; topic "general" = none)', collect, [])
+  .option('--seen <id>', 'existing weakness observed again (repeatable)', collect, [])
+  .option('--handled <id>', 'existing weakness handled well this time (repeatable)', collect, [])
   .option('--summary <text>', 'one-paragraph tutor summary')
   .option('--tests-passed <n>', 'override tests passed (defaults to latest run)', Number)
   .option('--tests-total <n>', 'override tests total (defaults to latest run)', Number)
@@ -271,8 +300,7 @@ program
     for (const k of ['optimality', 'approach', 'codeQuality', 'communication'] as const) {
       if (typeof rubric[k] !== 'number') throw new Error(`--rubric is missing numeric "${k}"`);
     }
-    const weaknesses = o.weaknesses ? (parseObjectArg(o.weaknesses, '--weaknesses') as WeaknessObservation[]) : [];
-    if (!Array.isArray(weaknesses)) throw new Error('--weaknesses must be a JSON array');
+    const weaknesses = weaknessObservations(o);
     const r = recordAttempt(db(), cfg, {
       slug,
       rubric,
@@ -341,9 +369,13 @@ weakness
 weakness
   .command('observe')
   .description('log an observation outside of record-attempt (e.g. during a discussion)')
-  .requiredOption('--weaknesses <json>', 'JSON array, same format as record-attempt')
+  .option('--weaknesses <json>', 'JSON array, same format as record-attempt')
+  .option('--weakness <"Topic :: description">', 'repeatable', collect, [])
+  .option('--seen <id>', 'repeatable', collect, [])
+  .option('--handled <id>', 'repeatable', collect, [])
   .action((o) => {
-    const obs = parseObjectArg(o.weaknesses, '--weaknesses') as WeaknessObservation[];
+    const obs = weaknessObservations(o);
+    if (!obs.length) throw new Error('Nothing to record');
     const d = db();
     const changes = d.transaction(() => applyWeaknessObservations(d, cfg, getPrefs(d).track, null, obs))();
     out(changes, () => changes.map((w) => `#${w.id} "${w.description}": ${w.action} → ${w.status}`));
