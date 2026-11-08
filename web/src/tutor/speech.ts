@@ -228,7 +228,7 @@ export class Speaker {
   private recent: { words: string[]; at: number }[] = [];
   private lastEnd = 0;
   engine: TtsEngine = 'kokoro';
-  kokoroVoice = 'af_heart';
+  kokoroVoice = 'am_michael';
   voiceURI: string | null = null;
   rate = 1.05;
   enabled = true;

@@ -24,7 +24,7 @@ export interface VoiceSettings {
   pauseMs: number;
 }
 
-const DEFAULT_SETTINGS: VoiceSettings = { voiceOut: true, engine: 'kokoro', kokoroVoice: 'af_heart', voiceURI: null, rate: 1.05, pauseMs: 1800 };
+const DEFAULT_SETTINGS: VoiceSettings = { voiceOut: true, engine: 'kokoro', kokoroVoice: 'am_michael', voiceURI: null, rate: 1.05, pauseMs: 1800 };
 
 interface TutorApi {
   connected: boolean;
@@ -68,7 +68,8 @@ function tabId(): string {
 
 function loadSettings(): VoiceSettings {
   try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('prep.voice') ?? '{}') };
+    // v2 stores only what the user changed, so new defaults still reach them.
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('prep.voice.v2') ?? '{}') };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -148,7 +149,11 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     speaker.rate = settings.rate;
     listener.pauseMs = settings.pauseMs;
     try {
-      localStorage.setItem('prep.voice', JSON.stringify(settings));
+      const changed = Object.fromEntries(
+        Object.entries(settings).filter(([k, v]) => DEFAULT_SETTINGS[k as keyof VoiceSettings] !== v),
+      );
+      localStorage.setItem('prep.voice.v2', JSON.stringify(changed));
+      localStorage.removeItem('prep.voice');
     } catch {
       /* private mode */
     }

@@ -7,11 +7,11 @@ import path from 'node:path';
  */
 
 export const KOKORO_VOICES: { id: string; label: string }[] = [
-  { id: 'af_heart', label: 'Heart (US, female)' },
   { id: 'af_bella', label: 'Bella (US, female)' },
   { id: 'af_nicole', label: 'Nicole (US, female, soft)' },
   { id: 'af_sarah', label: 'Sarah (US, female)' },
-  { id: 'am_michael', label: 'Michael (US, male)' },
+  { id: 'am_michael', label: 'Michael (US, male) — default' },
+  { id: 'af_heart', label: 'Heart (US, female)' },
   { id: 'am_fenrir', label: 'Fenrir (US, male)' },
   { id: 'am_puck', label: 'Puck (US, male)' },
   { id: 'bf_emma', label: 'Emma (UK, female)' },
@@ -49,7 +49,7 @@ export class Tts {
           dtype: this.dtype,
           device: 'cpu',
         })) as unknown as Kokoro;
-        await m.generate('Ready.', { voice: 'af_heart', speed: 1 }); // warm-up
+        await m.generate('Ready.', { voice: 'am_michael', speed: 1 }); // warm-up
         this.state = 'ready';
         this.error = null;
         return m;
@@ -68,7 +68,7 @@ export class Tts {
    * speaking order); `cancelled()` lets a job be skipped if the listener has gone away (barge-in).
    */
   synthesize(text: string, voice: string, speed: number, cancelled: () => boolean): Promise<Buffer | null> {
-    const v = VOICE_IDS.has(voice) ? voice : 'af_heart';
+    const v = VOICE_IDS.has(voice) ? voice : 'am_michael';
     const s = Math.min(1.6, Math.max(0.7, Number.isFinite(speed) ? speed : 1));
     const job = this.chain.then(async () => {
       if (cancelled()) return null;

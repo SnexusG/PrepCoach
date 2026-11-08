@@ -71,7 +71,7 @@ function Settings({ onClose }: { onClose: () => void }) {
         <label>
           Voice
           <select value={t.settings.kokoroVoice} onChange={(e) => t.updateSettings({ kokoroVoice: e.target.value })}>
-            {(tts?.voices ?? [{ id: 'af_heart', label: 'Heart (US, female)' }]).map((v) => (
+            {(tts?.voices ?? [{ id: 'am_michael', label: 'Michael (US, male)' }]).map((v) => (
               <option key={v.id} value={v.id}>
                 {v.label}
               </option>
