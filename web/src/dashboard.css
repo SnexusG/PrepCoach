@@ -14,6 +14,32 @@
 .nav a.active { color: var(--text); background: var(--panel-2); }
 .topbar .brand { margin-right: 4px; }
 
+/* ---------- home ---------- */
+.dash.home { align-items: center; padding-top: 48px; }
+.dash.home > * { width: 100%; max-width: 720px; }
+.home-hero {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 28px 28px 22px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.home-track { font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.home-hero h1 { margin: 0; font-size: 26px; }
+.home-lead { margin: 0; color: var(--muted); }
+.home-cta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.home-cta button { padding: 10px 18px; font-size: 15px; border-radius: 8px; }
+.home-cta button.cta { background: var(--accent); border-color: var(--accent); color: #0d1420; font-weight: 600; }
+.home-cta button.cta:hover:not(:disabled) { filter: brightness(1.1); }
+.home-facts {
+  display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; padding-top: 12px;
+  border-top: 1px solid var(--border); font-size: 13px; color: var(--muted);
+}
+.home-facts b { color: var(--text); font-variant-numeric: tabular-nums; }
+.home-last { margin: 0; }
+.home-soon { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.home-soon-card { border: 1px dashed var(--border); border-radius: 8px; padding: 12px 14px; opacity: 0.75; }
+.home-soon-card p { margin: 6px 0 0; }
+.home-soon-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.home-tip { margin-top: auto; }
+
 /* ---------- dashboard ---------- */
 .dash-page, .history-page { display: flex; flex-direction: column; height: 100%; }
 .dash-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 400px; }

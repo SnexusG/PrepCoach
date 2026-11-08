@@ -7,7 +7,8 @@ export default function NavBar({ children }: { children?: ReactNode }) {
     <header className="topbar">
       <NavLink to="/" className="brand">PrepCoach</NavLink>
       <nav className="nav">
-        <NavLink to="/" end>Dashboard</NavLink>
+        <NavLink to="/" end>Home</NavLink>
+        <NavLink to="/dashboard">Dashboard</NavLink>
         <NavLink to="/history">History</NavLink>
       </nav>
       {children}

@@ -40,7 +40,7 @@ Open **http://localhost:5173**. The first `npm run dev` downloads the Kokoro voi
 ## Practising
 
 ### By voice (recommended)
-1. On the dashboard, click **🎙 Start talking** and say *"let's start a session"*.
+1. On the home page, click **🎙 Start with voice** (or say *"let's start a session"* with the mic on).
 2. The tutor greets you with your status and serves a problem. The problem page opens automatically:
    statement, editor and tests on screen, tutor panel underneath.
 3. Talk through your approach and its complexity. The tutor probes edge cases and asks "can you do better?",
@@ -118,7 +118,7 @@ Run `npx prep --help` for everything.
 core/      shared library: DB, rating engine, selection, spaced repetition, Java runner
 cli/       the `prep` CLI (single source of truth for state)
 server/    Express API + voice-tutor bridge (headless Claude Code) + local TTS
-web/       Vite + React app (dashboard, problem page, history, voice)
+web/       Vite + React app (home, dashboard, problem page, history, voice)
 harness/   Java test harness (per-test timeout, ListNode/TreeNode/design problems)
 problems/  one folder per problem: Problem.md, Solution.java, tests.json, notes.md
 data/      sheets (catalogs). Generated and ignored by git: prep.db, backups/, models/, tutor/
