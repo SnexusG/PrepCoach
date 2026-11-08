@@ -1,0 +1,75 @@
+{
+  "rating": {
+    "initial": 1200,
+    "difficultyRatings": { "easy": 1100, "medium": 1400, "hard": 1700 },
+    "kFactor": { "provisional": 48, "provisionalAttempts": 5, "standard": 24 },
+    "secondaryTopicWeight": 0.5,
+    "reviewWeight": 0.5,
+    "rubricWeights": {
+      "correctness": 0.35,
+      "optimality": 0.2,
+      "approach": 0.15,
+      "codeQuality": 0.1,
+      "communication": 0.1,
+      "independence": 0.1
+    },
+    "partialCorrectnessFactor": 0.7,
+    "hintCaps": [1.0, 0.85, 0.7, 0.5, 0.25],
+    "hintNames": ["none", "nudge", "pattern", "approach", "full solution"],
+    "confidence": { "lowAttempts": 3, "fullAttempts": 10, "minWeight": 0.1 },
+    "labels": [
+      { "min": 0, "label": "Beginner" },
+      { "min": 1200, "label": "Developing" },
+      { "min": 1400, "label": "Interview-ready (mediums)" },
+      { "min": 1600, "label": "Strong" }
+    ]
+  },
+  "topics": {
+    "dsa": [
+      { "name": "Arrays & Hashing", "frequencyWeight": 1.0 },
+      { "name": "Two Pointers", "frequencyWeight": 0.8 },
+      { "name": "Sliding Window", "frequencyWeight": 0.8 },
+      { "name": "Stack", "frequencyWeight": 0.7 },
+      { "name": "Binary Search", "frequencyWeight": 0.8 },
+      { "name": "Linked List", "frequencyWeight": 0.7 },
+      { "name": "Trees", "frequencyWeight": 1.0 },
+      { "name": "Tries", "frequencyWeight": 0.4 },
+      { "name": "Heap / Priority Queue", "frequencyWeight": 0.7 },
+      { "name": "Backtracking", "frequencyWeight": 0.6 },
+      { "name": "Graphs", "frequencyWeight": 1.0 },
+      { "name": "Advanced Graphs", "frequencyWeight": 0.5 },
+      { "name": "1-D Dynamic Programming", "frequencyWeight": 0.9 },
+      { "name": "2-D Dynamic Programming", "frequencyWeight": 0.7 },
+      { "name": "Greedy", "frequencyWeight": 0.6 },
+      { "name": "Intervals", "frequencyWeight": 0.6 },
+      { "name": "Math & Geometry", "frequencyWeight": 0.3 },
+      { "name": "Bit Manipulation", "frequencyWeight": 0.3 }
+    ],
+    "system_design": [],
+    "java": []
+  },
+  "spacedRepetition": {
+    "initialIntervals": { "low": 1, "mid": 3, "high": 7 },
+    "lowThreshold": 0.5,
+    "highThreshold": 0.75,
+    "reviewPassThreshold": 0.6,
+    "initialEase": 2.0,
+    "minEase": 1.3,
+    "maxEase": 2.5,
+    "maxIntervalDays": 60
+  },
+  "selection": {
+    "maxReviewsPerSession": 1,
+    "weakTopicMargin": 50,
+    "hardPromotionThreshold": 1550,
+    "failOutcomeThreshold": 0.5,
+    "consecutiveFailsToDrop": 2
+  },
+  "weaknesses": {
+    "cleanDemonstrationsToResolve": 3
+  },
+  "runner": {
+    "perTestTimeoutMs": 2000
+  },
+  "ports": { "web": 5173, "api": 5175 }
+}

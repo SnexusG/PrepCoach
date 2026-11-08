@@ -1,0 +1,142 @@
+# Build: "PrepCoach", a local interview-prep app with Claude Code as the tutor
+
+## Who I am and what I want
+I'm a software engineer preparing for big-tech interviews. I want a personal, local-only tool for three tracks: **DSA**, **System Design** and **Java Fundamentals**. For each track it should track my progress, keep a rating of my level, remember my specific weaknesses, and run progressive sessions that keep pushing on those weak areas.
+
+**v1 scope: build only the DSA track in full.** System Design and Java Fundamentals should exist as stubs: the same data model, a placeholder on the dashboard and reserved sections in the tutor instructions. That way I can add them later without a redesign.
+
+## Core architecture decision (important)
+I have a Claude Pro subscription and **no Anthropic API key**, so the app must **not** call any LLM API. Instead:
+
+- **Claude Code (you, in my terminal) is the tutor.** All tutoring happens in the Claude Code chat: serving questions, discussing my approach, giving hints, reviewing code and judging quality. It's driven by a project `CLAUDE.md` and custom slash commands.
+- **A local web app** (runs on `localhost`) provides the things a terminal is bad at: a code editor, a "Run tests" button that compiles and runs my Java, and a progress dashboard.
+- **A small CLI (`prep`)** is the single source of truth for state. Both you (the tutor) and the web app read and write state **only through this CLI / shared library**. All rating math is deterministic code in the CLI. You never do rating arithmetic in your head or edit the database directly.
+
+```
+┌───────────────┐   slash commands   ┌──────────────┐
+│  Me (terminal)│ ─────────────────▶ │ Claude Code  │──┐ runs `prep ...` commands
+└───────────────┘                    │  = tutor     │  │ reads solution files
+        │                            └──────────────┘  │
+        │ browser                                       ▼
+┌───────────────┐   HTTP   ┌──────────────┐     ┌──────────────┐
+│ Web UI        │ ───────▶ │ Local server │ ──▶ │ SQLite DB +  │
+│ editor/tests/ │          │ (Express)    │     │ files on disk│
+│ dashboard     │          └──────────────┘     └──────────────┘
+└───────────────┘
+```
+
+## Tech stack (keep setup simple)
+- Node.js 20+ and TypeScript, one repo, `npm install && npm run dev` to start everything.
+- Backend: Express + `better-sqlite3`. DB file at `data/prep.db`.
+- Frontend: Vite + React, **Monaco editor** for Java, a charting library (e.g. Recharts) for the dashboard.
+- CLI: `prep` (TypeScript, run via `npx prep` or an npm script), sharing a `core/` library with the server.
+- Java: I'll write solutions in **Java 17+**. Compile and run with the local `javac`/`java`. Use a **lightweight custom test harness** (no Maven/Gradle) that compares outputs, with a **per-test timeout** (e.g. 2s) to catch infinite loops. Report pass/fail per case, the first failing input with expected vs actual, and runtime.
+- Write a `README.md` with setup steps (JDK check, Node check, how to start, how to use the slash commands).
+
+## Repo layout (suggested)
+```
+core/            shared logic: db access, rating engine, selection algorithm, spaced repetition
+cli/             `prep` CLI
+server/          Express API (editor save/load, run tests, dashboard data)
+web/             React app
+data/
+  prep.db
+  sheets/neetcode150.json        problem catalog
+problems/<slug>/
+  Solution.java                  my code (also editable from my IDE)
+  Problem.md                     short statement written in your own words + link to original
+  tests.json                     test cases
+  notes.md                       running discussion notes / takeaways
+.claude/commands/                slash commands (see below)
+CLAUDE.md                        tutor instructions
+```
+
+## Data model (SQLite)
+Design it so it's **track-agnostic** (`track` = `dsa` | `system_design` | `java`):
+- `tracks`: id, name, enabled.
+- `topics`: id, track, name (DSA topics = NeetCode categories: Arrays & Hashing, Two Pointers, Sliding Window, Stack, Binary Search, Linked List, Trees, Tries, Heap/Priority Queue, Backtracking, Graphs, Advanced Graphs, 1-D DP, 2-D DP, Greedy, Intervals, Math & Geometry, Bit Manipulation).
+- `problems`: slug, track, title, topic_id, secondary topic tags, difficulty (easy/medium/hard), difficulty_rating (number), source sheet, order in sheet, external URL.
+- `attempts`: id, problem, started_at, finished_at, solve_time_sec, hints_used (0–4), tests_passed/total, rubric scores (see below), outcome_score (0–1), rating_before/after per topic, is_review (bool), tutor summary text.
+- `ratings`: track, topic, rating, attempts_count, last_updated; plus `rating_history` rows for charts.
+- `weaknesses`: id, track, topic (nullable), **specific description** (e.g. "off-by-one on binary search bounds", "forgets visited set in graph BFS", "doesn't state complexity unprompted"), times_observed, first_seen, last_seen, status (active / improving / resolved), linked attempt ids.
+- `review_queue` (spaced repetition): problem, due_date, interval_days, ease, last_outcome.
+- `sessions` / `preferences`: active sheet, preferred difficulty, current mode.
+
+## Problem catalog
+- Build `data/sheets/neetcode150.json` with all 150 problems: title, slug, NeetCode category, difficulty and LeetCode URL. **Don't guess the list from memory.** Fetch it from neetcode.io (or the public NeetCode GitHub repo) if you can. If you can't, generate it, mark it `unverified`, and tell me so I can check it.
+- Make sheets pluggable (e.g. Blind 75 or Grind 75 later, same JSON format).
+- **Problem statements and tests are generated lazily**, the first time a problem is served: write `Problem.md` as a short statement **in your own words** (don't copy LeetCode text), with constraints, 2–3 examples and the original link. Then write a `Solution.java` stub with the correct method signature, and `tests.json` with ~10–20 cases including edge cases (empty input, single element, duplicates, negatives, max constraints). Verify the tests yourself against a reference solution you write privately and **do not show me** or save in the repo.
+
+## Rating system
+- **Elo-style rating per topic**, starting at 1200. Each problem has a difficulty rating (Easy ≈ 1100, Medium ≈ 1400, Hard ≈ 1700, tunable per problem).
+- After each attempt the tutor calls `prep record-attempt` with a rubric. The CLI computes `outcome_score` (0–1) from weighted components, for example:
+  - correctness (tests passed ratio, all-pass required for full credit): 35%
+  - optimality of time/space complexity vs the best known approach: 20%
+  - approach quality (explained a correct plan before coding, identified the pattern): 15%
+  - code quality (readability, Java idioms, edge-case handling): 10%
+  - communication (stated complexity, walked through an example, handled follow-ups): 10%
+  - independence: 10%, scaled down by hints used
+- **Hint penalty:** cap the max achievable outcome by hint level (0 hints: 1.0, nudge: 0.85, pattern: 0.7, approach: 0.5, full solution: 0.25).
+- Elo update: `expected = 1/(1+10^((problemRating − topicRating)/400))`, `new = old + K·(outcome − expected)`. Use a higher K for the first ~5 attempts in a topic (e.g. 48), then 24. Also update secondary-topic ratings at half weight.
+- **Overall DSA rating** = weighted average of topic ratings (weight by interview frequency × confidence from attempt count). Show a confidence indicator when a topic has fewer than 3 attempts.
+- Map ratings to readable labels (e.g. <1200 Beginner, 1200–1400 Developing, 1400–1600 Interview-ready for mediums, 1600+ Strong).
+- Put all weights and constants in one config file so I can tune them.
+
+## Question selection ("what's next")
+`prep next` returns the next problem plus a reason, chosen in this priority order:
+1. **Spaced-repetition reviews that are due** (at most 1 per session unless I ask for more).
+2. A problem that targets an **active weakness** or my **lowest-rated topic**, within my chosen difficulty.
+3. Otherwise the **next unsolved problem in sheet order** at my chosen difficulty (e.g. "start with mediums").
+- Progression: suggest moving up to hards in a topic once its rating passes a threshold. Suggest dropping to easies if I fail 2 mediums in a row in that topic.
+- The CLI also has `prep context`: a compact markdown summary (overall rating, per-topic ratings, active weaknesses with examples, recent attempts, due reviews). The tutor reads it at the start of every session.
+
+## Spaced repetition
+- After each attempt, schedule a review: a lower outcome means a sooner review (outcome < 0.5: 1 day; 0.5–0.75: 3 days; > 0.75: 7 days). Each successful review roughly doubles the interval (cap at 60 days). A failed review resets it to 1 day.
+- A review is lighter than a full solve: I explain the approach and complexity, then code it quickly. It counts toward the rating at reduced weight.
+
+## Session flow (the tutoring loop)
+1. **`/prep-start`**: run `prep context`, greet me with a 3–4 line status (overall rating, weakest topics, reviews due), then confirm or set the sheet and difficulty (e.g. "NeetCode 150, mediums").
+2. **`/next`**: run `prep next`, generate the problem files if needed, and present the problem in the chat. Tell me it's open in the web editor (`localhost:<port>/problem/<slug>`). Start the timer.
+3. **Approach phase (required before coding):** I explain my approach and expected complexity. You respond like an interviewer: probe edge cases and ask "can you do better?". **Don't** confirm or give away the optimal approach unless I ask for a hint.
+4. **Coding:** I code in the browser editor (or my IDE) and run the tests there. The run results are saved to the DB / a results file you can read.
+5. **`/hint`**: tiered hints: (1) nudge, (2) name the pattern / data structure, (3) outline the approach, (4) full walkthrough. Each level is logged and reduces the max rating gain. Warn me what the next hint costs before giving it.
+6. **`/submit`**: read my `Solution.java` and latest test results, then review it like an interviewer: correctness, time/space complexity, edge cases, code quality, and how it compares to the optimal approach. Ask 1–2 follow-up questions (e.g. "what if the input were streamed?"). Then call `prep record-attempt` with the rubric scores **and specific weakness tags** (new, or matched to existing ones). Report the rating change in one line, and append key takeaways to `problems/<slug>/notes.md`.
+7. **Weakness memory:** when you observe a weakness that's already logged, increment it. When I clearly handle a previously logged weakness well, mark it improving, and after 2–3 clean demonstrations, resolved. **Bring up active weaknesses naturally** in later sessions ("last time you missed the empty-array case; watch for it here") and in your problem choices.
+8. **`/status`**: summarize progress (ratings, trend, weaknesses, sheet completion %, reviews due).
+9. **`/end`**: wrap up the session with 3 bullet takeaways and what to focus on next time.
+
+Implement these as Claude Code custom slash commands in `.claude/commands/` (or skills), each with clear instructions, and put the persona and rules in `CLAUDE.md`.
+
+## Tutor persona and rules (for `CLAUDE.md`)
+- Act like a supportive but rigorous big-tech interviewer and coach. Use the Socratic approach first, and keep answers concise.
+- Never reveal the solution unprompted. Never edit my `Solution.java` unless I explicitly ask.
+- Always ground claims in my actual code and test results. Run the code if unsure.
+- All state changes go through `prep` CLI commands. Never write to the DB directly and never compute ratings yourself.
+- At the start of every conversation, run `prep context` before anything else.
+- Reserved sections, "System Design track (coming soon)" and "Java Fundamentals track (coming soon)", describing how they'll work later: design prompts graded on requirements/estimation/high-level design/deep dives/trade-offs, and Java concept Q&A plus small coding exercises on collections, concurrency, JVM/GC, generics, streams, OOP and exceptions.
+
+## Web app pages
+1. **Problem page** (`/problem/:slug`): problem statement (rendered `Problem.md`), Monaco Java editor (autosaves to `Solution.java`, picks up external edits), **Run tests** button with per-case results, timer, and hint level used (read-only).
+2. **Dashboard** (`/`): overall DSA rating with label and trend, per-topic rating bars (weakest first, with a confidence indicator), rating-over-time line chart, active weaknesses list, reviews due, NeetCode 150 completion by topic and difficulty, recent attempts. Show System Design and Java tiles as "coming soon".
+3. **History** (`/history`): list of attempts with filters, linking to the code, notes and tutor summary.
+
+## CLI commands (minimum)
+`prep init`, `prep context`, `prep next [--topic X] [--difficulty medium]`, `prep start <slug>`, `prep run-tests <slug>`, `prep record-attempt <slug> --rubric '<json>' --hints N --weaknesses '<json>'`, `prep weakness list|update`, `prep reviews`, `prep set --sheet neetcode150 --difficulty medium`, `prep stats`. Output human-readable text by default and `--json` for the web server.
+
+## Build plan (work in phases and show me each one working before moving on)
+1. Scaffold the repo, DB schema, `core/` rating engine + selection + spaced repetition, with **unit tests for the rating math**.
+2. `prep` CLI and the NeetCode 150 catalog import.
+3. Java test harness + lazy problem generation (statement, stub, tests). Verify on 3 sample problems.
+4. `CLAUDE.md` + slash commands. Do a full dry run of one problem end-to-end with me.
+5. Web app: problem page with editor and test runner.
+6. Dashboard and history pages.
+7. Polish: README, config file for tuning constants, `prep backup` (copies the DB to a timestamped file).
+
+## Acceptance criteria
+- `npm install && npm run dev` starts the server and web UI. `prep` works from the repo root.
+- I can do `/prep-start` → `/next` → explain approach → code in browser → run tests → `/submit`, and my topic rating, weaknesses and review queue update correctly.
+- A weakness logged in one session is mentioned and targeted in a later session.
+- The dashboard reflects every attempt immediately.
+- Nothing calls an external LLM API, and everything runs locally.
+
+**Before you start coding,** read this whole spec, then ask me any clarifying questions and propose the final file structure and schema. Wait for my OK, then begin Phase 1.

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/prep.db
+data/prep.db-*
+data/backups/*
+!data/backups/.gitkeep
+problems/*/.build/
+problems/*/.results.json
+.private/
+*.log
+.DS_Store

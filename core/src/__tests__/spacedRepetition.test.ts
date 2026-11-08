@@ -1,0 +1,56 @@
+import { describe, expect, it } from 'vitest';
+import { loadConfig } from '../config';
+import { addDays, initialInterval, isDue, scheduleReview, toDateString, type ReviewState } from '../spacedRepetition';
+
+const cfg = loadConfig();
+const today = new Date(2026, 10, 8); // 2026-11-08 local
+
+describe('spaced repetition', () => {
+  it('picks the initial interval from the outcome band', () => {
+    expect(initialInterval(0.3, cfg)).toBe(1);
+    expect(initialInterval(0.5, cfg)).toBe(3);
+    expect(initialInterval(0.75, cfg)).toBe(3);
+    expect(initialInterval(0.76, cfg)).toBe(7);
+  });
+
+  it('schedules a fresh attempt with a due date', () => {
+    const s = scheduleReview(null, 0.6, false, today, cfg);
+    expect(s).toMatchObject({ intervalDays: 3, ease: 2, dueDate: '2026-11-11', reviewsCount: 0 });
+  });
+
+  it('a fresh (non-review) attempt resets an existing schedule', () => {
+    const prev: ReviewState = { intervalDays: 30, ease: 2.4, dueDate: '2026-12-01', lastOutcome: 0.9, reviewsCount: 3 };
+    const s = scheduleReview(prev, 0.4, false, today, cfg);
+    expect(s.intervalDays).toBe(1);
+    expect(s.reviewsCount).toBe(0);
+  });
+
+  it('a passed review roughly doubles the interval', () => {
+    const prev: ReviewState = { intervalDays: 7, ease: 2, dueDate: '2026-11-08', lastOutcome: 0.8, reviewsCount: 0 };
+    expect(scheduleReview(prev, 0.8, true, today, cfg)).toMatchObject({ intervalDays: 14, ease: 2, reviewsCount: 1 });
+    expect(scheduleReview(prev, 0.9, true, today, cfg)).toMatchObject({ intervalDays: 15, ease: 2.1 });
+    expect(scheduleReview(prev, 0.65, true, today, cfg)).toMatchObject({ intervalDays: 13, ease: 1.85 }); // 7 × 1.85 = 12.95
+  });
+
+  it('caps the interval at 60 days', () => {
+    const prev: ReviewState = { intervalDays: 40, ease: 2.5, dueDate: '2026-11-08', lastOutcome: 0.9, reviewsCount: 4 };
+    expect(scheduleReview(prev, 0.95, true, today, cfg).intervalDays).toBe(60);
+  });
+
+  it('a failed review resets to 1 day and lowers ease', () => {
+    const prev: ReviewState = { intervalDays: 14, ease: 2, dueDate: '2026-11-08', lastOutcome: 0.8, reviewsCount: 1 };
+    expect(scheduleReview(prev, 0.4, true, today, cfg)).toMatchObject({ intervalDays: 1, ease: 1.8, dueDate: '2026-11-09' });
+  });
+
+  it('never drops ease below the minimum', () => {
+    const prev: ReviewState = { intervalDays: 1, ease: 1.35, dueDate: '2026-11-08', lastOutcome: 0.2, reviewsCount: 5 };
+    expect(scheduleReview(prev, 0.1, true, today, cfg).ease).toBe(1.3);
+  });
+
+  it('handles month/year boundaries and due checks', () => {
+    expect(toDateString(addDays(new Date(2026, 10, 29), 7))).toBe('2026-12-06');
+    expect(toDateString(addDays(new Date(2026, 11, 30), 3))).toBe('2027-01-02');
+    expect(isDue({ dueDate: '2026-11-08' }, today)).toBe(true);
+    expect(isDue({ dueDate: '2026-11-09' }, today)).toBe(false);
+  });
+});

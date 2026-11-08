@@ -1,0 +1,15 @@
+{
+  "name": "prepcoach",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "core"
+  ],
+  "scripts": {
+    "test": "npm run test -w @prepcoach/core",
+    "typecheck": "npm run typecheck -w @prepcoach/core"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
