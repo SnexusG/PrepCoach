@@ -26,6 +26,9 @@ import {
   ratingLabel,
   recordAttempt,
   recordHint,
+  recordTestRun,
+  runJavaTests,
+  formatRunResult,
   renderContextMarkdown,
   seed,
   setPreference,
@@ -213,9 +216,44 @@ program
 // ---------------- run-tests ----------------
 program
   .command('run-tests <slug>')
-  .description('compile and run Solution.java against tests.json')
-  .action(() => {
-    throw new Error('run-tests arrives in Phase 3 (Java harness).');
+  .description('compile and run Solution.java against tests.json (saves .results.json and updates the open attempt)')
+  .option('--solution <file>', 'run this file as Solution.java instead (verify tests against a private reference; nothing is saved)')
+  .action(async (slug, o) => {
+    const d = db();
+    getProblem(d, slug);
+    const files = problemFiles(slug);
+    if (!fs.existsSync(files.tests)) throw new Error(`No tests.json for "${slug}" yet — generate the problem files first.`);
+    const r = await runJavaTests(files.dir, { solutionFile: o.solution, timeoutMs: cfg.runner.perTestTimeoutMs });
+    if (!o.solution) {
+      fs.writeFileSync(files.results, JSON.stringify({ slug, ...r }, null, 2));
+      if (r.compiled) recordTestRun(d, slug, r.passed, r.total);
+    }
+    out({ slug, ...r }, () => formatRunResult(r));
+    if (!r.allPassed) process.exitCode = 2;
+  });
+
+// ---------------- scaffold ----------------
+program
+  .command('scaffold <slug>')
+  .description('create problems/<slug>/ with notes.md (and Node.java for graph/random-pointer problems)')
+  .option('--node <kind>', 'graph | random — copy the matching Node class template')
+  .action((slug, o) => {
+    const p = getProblem(db(), slug);
+    const files = problemFiles(slug);
+    fs.mkdirSync(files.dir, { recursive: true });
+    if (!fs.existsSync(files.notes)) {
+      fs.writeFileSync(files.notes, `# ${p.title} — notes\n\nTopic: ${p.topic} · Difficulty: ${p.difficulty} · ${p.url ?? ''}\n\n`);
+    }
+    if (o.node) {
+      const tpl = { graph: 'GraphNode.java', random: 'RandomNode.java' }[o.node as string];
+      if (!tpl) throw new Error('--node must be graph or random');
+      fs.copyFileSync(path.join(paths.harness, 'templates', tpl), path.join(files.dir, 'Node.java'));
+    }
+    const missing = (['problemMd', 'solution', 'tests'] as const).filter((k) => !fs.existsSync(files[k])).map((k) => rel(files[k]));
+    out({ dir: files.dir, missing }, () => [
+      `Scaffolded ${rel(files.dir)}`,
+      missing.length ? `Still to write: ${missing.join(', ')}` : 'All problem files present.',
+    ]);
   });
 
 // ---------------- record-attempt ----------------

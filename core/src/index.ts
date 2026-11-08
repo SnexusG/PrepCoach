@@ -8,3 +8,4 @@ export * from './attempts';
 export * from './catalog';
 export * from './sessions';
 export * from './queries';
+export * from './javaRunner';
