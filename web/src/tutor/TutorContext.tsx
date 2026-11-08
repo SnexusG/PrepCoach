@@ -22,9 +22,19 @@ export interface VoiceSettings {
   voiceURI: string | null;
   rate: number;
   pauseMs: number;
+  /** Show the full chat while the mic is on (otherwise it collapses to a caption strip). */
+  chatInVoice: boolean;
 }
 
-const DEFAULT_SETTINGS: VoiceSettings = { voiceOut: true, engine: 'kokoro', kokoroVoice: 'am_michael', voiceURI: null, rate: 1.05, pauseMs: 1800 };
+const DEFAULT_SETTINGS: VoiceSettings = {
+  voiceOut: true,
+  engine: 'kokoro',
+  kokoroVoice: 'am_michael',
+  voiceURI: null,
+  rate: 1.05,
+  pauseMs: 1800,
+  chatInVoice: false,
+};
 
 interface TutorApi {
   connected: boolean;
@@ -42,6 +52,7 @@ interface TutorApi {
   synthesisSupported: boolean;
   send(text: string): void;
   toggleMic(): void;
+  startMic(): void;
   stopSpeaking(): void;
   preview(text: string): void;
   interrupt(): void;
@@ -231,6 +242,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     synthesisSupported,
     send,
     toggleMic: () => (listener.active ? listener.stop() : listener.start()),
+    startMic: () => listener.start(),
     stopSpeaking: hush,
     preview: (text) => {
       hush();

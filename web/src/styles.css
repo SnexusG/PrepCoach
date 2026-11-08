@@ -212,6 +212,18 @@ pre.err.block { padding: 12px; }
 button.mic { font-weight: 600; }
 button.mic.on { background: #4a2323; border-color: var(--fail); }
 .t-list { flex: 1; min-height: 0; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.t-voice { flex: 1; min-height: 0; overflow: auto; padding: 14px 10px; display: flex; flex-direction: column; gap: 10px; }
+.t-caption {
+  align-self: center; max-width: 92%; padding: 6px 12px; border-radius: 10px; text-align: center;
+  background: #23395d; opacity: 0; transition: opacity 0.4s ease; overflow-wrap: anywhere;
+}
+.t-caption.on { opacity: 0.85; }
+.t-caption.live { font-style: italic; opacity: 0.6; }
+.t-shown { max-width: 100%; }
+.t-expand {
+  margin-top: auto; align-self: center; background: none; border: none; color: var(--muted);
+  font-size: 12px; cursor: pointer; text-decoration: underline;
+}
 .t-empty { color: var(--muted); text-align: center; margin: auto; max-width: 340px; }
 .t-msg { max-width: 88%; padding: 6px 10px; border-radius: 10px; overflow-wrap: anywhere; }
 .t-msg p { margin: 0.2em 0; }

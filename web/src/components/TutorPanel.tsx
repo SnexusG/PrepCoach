@@ -24,6 +24,41 @@ function Entry({ e }: { e: TranscriptEntry }) {
   );
 }
 
+const FENCE = /```[^\n]*\n[\s\S]*?(?:```|$)/g;
+
+/**
+ * Voice mode with the chat collapsed: a one-line caption of what was heard (gone once the tutor answers), plus
+ * anything in the latest reply that is shown rather than spoken (fenced code / tables) and the latest error.
+ */
+function VoiceView({ onExpand }: { onExpand: () => void }) {
+  const t = useTutor();
+  const lastIdx = (pred: (e: TranscriptEntry) => boolean) => {
+    for (let i = t.entries.length - 1; i >= 0; i--) if (pred(t.entries[i])) return i;
+    return -1;
+  };
+  const iUser = lastIdx((e) => e.role === 'user');
+  const iTutor = lastIdx((e) => e.role === 'tutor');
+  const iError = lastIdx((e) => e.role === 'error');
+
+  const caption = t.interim || (iUser > iTutor ? t.entries[iUser].text : '');
+  const shown = iTutor >= 0 ? (t.entries[iTutor].text.match(FENCE) ?? []).join('\n\n') : '';
+
+  return (
+    <div className="t-voice">
+      <div className={`t-caption ${caption ? 'on' : ''} ${t.interim ? 'live' : ''}`}>{caption || ' '}</div>
+      {shown && (
+        <div className="t-msg bot t-shown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{shown}</ReactMarkdown>
+        </div>
+      )}
+      {iError > iTutor && <div className="t-error">{t.entries[iError].text}</div>}
+      <button className="t-expand" onClick={onExpand}>
+        Transcript hidden while talking. Show chat
+      </button>
+    </div>
+  );
+}
+
 function Settings({ onClose }: { onClose: () => void }) {
   const t = useTutor();
   const [voices, setVoices] = useState(englishVoices);
@@ -102,6 +137,10 @@ function Settings({ onClose }: { onClose: () => void }) {
         Speed {t.settings.rate.toFixed(2)}×
         <input type="range" min={0.8} max={1.5} step={0.05} value={t.settings.rate} onChange={(e) => t.updateSettings({ rate: +e.target.value })} />
       </label>
+      <label>
+        <input type="checkbox" checked={t.settings.chatInVoice} onChange={(e) => t.updateSettings({ chatInVoice: e.target.checked })} />
+        Show the chat while talking
+      </label>
       <label title="How long you must pause before your turn is sent">
         Pause to send {(t.settings.pauseMs / 1000).toFixed(1)} s
         <input type="range" min={1000} max={4000} step={100} value={t.settings.pauseMs} onChange={(e) => t.updateSettings({ pauseMs: +e.target.value })} />
@@ -137,6 +176,7 @@ export default function TutorPanel() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [t.entries, t.interim]);
 
+  const collapsed = t.listening && !t.settings.chatInVoice;
   const busy = t.state === 'thinking' || t.state === 'starting';
   const status = !t.connected
     ? 'offline'
@@ -163,6 +203,15 @@ export default function TutorPanel() {
         <span className="spacer" />
         {t.speaking && <button className="small-btn" onClick={t.stopSpeaking} title="Stop the voice">Stop voice</button>}
         {busy && <button className="small-btn" onClick={t.interrupt} title="Stop the tutor's current reply">Interrupt</button>}
+        {t.listening && (
+          <button
+            className="small-btn"
+            onClick={() => t.updateSettings({ chatInVoice: !t.settings.chatInVoice })}
+            title={collapsed ? 'Show the full chat while talking' : 'Collapse the chat while talking'}
+          >
+            {collapsed ? 'Show chat' : 'Hide chat'}
+          </button>
+        )}
         <button className="small-btn" onClick={() => setShowSettings((s) => !s)} title="Voice settings">⚙</button>
         <button
           className={`mic ${t.listening ? 'on' : ''}`}
@@ -178,6 +227,9 @@ export default function TutorPanel() {
       {t.micError && <div className="t-error">{t.micError}</div>}
       {t.voiceError && <div className="t-error">{t.voiceError}</div>}
 
+      {collapsed ? (
+        <VoiceView onExpand={() => t.updateSettings({ chatInVoice: true })} />
+      ) : (
       <div className="t-list" ref={listRef}>
         {t.entries.length === 0 && (
           <div className="t-empty">
@@ -190,6 +242,7 @@ export default function TutorPanel() {
         ))}
         {t.interim && <div className="t-msg user interim">{t.interim}</div>}
       </div>
+      )}
 
       <div className="t-actions">
         {ACTIONS.map((a) => (

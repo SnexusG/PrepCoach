@@ -32,15 +32,28 @@ export interface ListenerCallbacks {
   onActiveChange(active: boolean): void;
 }
 
+const wordList = (s: string) => s.trim().split(/\s+/).filter(Boolean);
+
 /**
  * Hands-free listener: keeps the mic open (restarting when the browser ends recognition), and commits a turn
  * once nothing new has been heard for `pauseMs`.
+ *
+ * Bookkeeping: a turn is often committed while the browser's last result is still interim, and the browser keeps
+ * appending the next words to that same result. So we remember how many of its words were already sent
+ * (`fromWords`) instead of skipping the whole result. Text heard in a recognition session the browser ended is
+ * carried into the next session rather than force-committed mid-sentence.
  */
 export class Listener {
   private rec: SR | null = null;
   private wanted = false;
-  private committedUpTo = 0;
-  private text = '';
+  private results: SREvent['results'] | null = null;
+  /** First result of the current session that is not fully sent. */
+  private fromIdx = 0;
+  /** Words of results[fromIdx] already sent (it was still interim when its turn was committed). */
+  private fromWords = 0;
+  /** Heard in an earlier, ended recognition session and not yet sent. */
+  private carry = '';
+  private retryOnEnd = false;
   private timer: number | undefined;
   private restartTimer: number | undefined;
   pauseMs = 1800;
@@ -66,16 +79,47 @@ export class Listener {
     window.clearTimeout(this.restartTimer);
     this.rec?.abort();
     this.rec = null;
-    this.text = '';
+    this.results = null;
+    this.fromIdx = this.fromWords = 0;
+    this.carry = '';
     this.cb.onInterim('');
     this.cb.onActiveChange(false);
   }
 
   /** Drop whatever has been heard so far (e.g. it was the tutor's own voice). */
   discard() {
-    window.clearTimeout(this.timer);
-    this.text = '';
+    this.consume();
     this.cb.onInterim('');
+  }
+
+  /** Everything heard and not yet sent. */
+  private pending(): string {
+    const parts = [this.carry];
+    const r = this.results;
+    if (r) {
+      for (let i = this.fromIdx; i < r.length; i++) {
+        const t = r[i][0].transcript;
+        parts.push(i === this.fromIdx && this.fromWords ? wordList(t).slice(this.fromWords).join(' ') : t);
+      }
+    }
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  /** Mark everything heard so far as sent. */
+  private consume() {
+    window.clearTimeout(this.timer);
+    this.carry = '';
+    const r = this.results;
+    if (!r || r.length === 0) return;
+    const last = r.length - 1;
+    if (r[last].isFinal) {
+      this.fromIdx = r.length;
+      this.fromWords = 0;
+    } else {
+      // Still interim: the browser may append the next words to it, so remember where we stopped.
+      this.fromIdx = last;
+      this.fromWords = wordList(r[last][0].transcript).length;
+    }
   }
 
   private open() {
@@ -83,30 +127,36 @@ export class Listener {
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = this.lang;
-    this.committedUpTo = 0;
+    this.results = null;
+    this.fromIdx = this.fromWords = 0;
     rec.onresult = (e) => {
-      let s = '';
-      for (let i = this.committedUpTo; i < e.results.length; i++) s += e.results[i][0].transcript;
-      this.text = s.trim();
-      this.cb.onInterim(this.text);
+      if (this.rec !== rec) return;
+      this.results = e.results;
+      const text = this.pending();
+      this.cb.onInterim(text);
       window.clearTimeout(this.timer);
-      const resultsLen = e.results.length;
-      this.timer = window.setTimeout(() => this.commit(resultsLen), this.pauseMs);
+      if (text) this.timer = window.setTimeout(() => this.commit(), this.pauseMs);
     };
     rec.onerror = (e) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         this.cb.onError('Microphone permission was denied.');
         this.stop();
-      } else if (e.error === 'network') {
+      } else if (e.error === 'network' || e.error === 'audio-capture') {
+        this.retryOnEnd = true;
         this.cb.onError('Speech recognition lost its connection; retrying…');
       } // 'no-speech' / 'aborted' are routine
     };
     rec.onend = () => {
       if (this.rec !== rec) return;
-      // Chrome ends continuous recognition periodically: commit what we have and reopen.
-      if (this.text) this.commit(Infinity);
+      // The browser ends continuous recognition periodically. Keep what we heard (the pause timer still decides
+      // when the turn ends) and reopen at once, so as few words as possible fall into the gap.
+      this.carry = this.pending();
+      this.results = null;
+      this.fromIdx = this.fromWords = 0;
       this.rec = null;
-      if (this.wanted) this.restartTimer = window.setTimeout(() => this.wanted && this.open(), 250);
+      const delay = this.retryOnEnd ? 500 : 0;
+      this.retryOnEnd = false;
+      if (this.wanted) this.restartTimer = window.setTimeout(() => this.wanted && !this.rec && this.open(), delay);
     };
     this.rec = rec;
     try {
@@ -116,11 +166,9 @@ export class Listener {
     }
   }
 
-  private commit(upTo: number) {
-    window.clearTimeout(this.timer);
-    const t = this.text.trim();
-    this.text = '';
-    this.committedUpTo = upTo === Infinity ? 0 : upTo;
+  private commit() {
+    const t = this.pending();
+    this.consume();
     this.cb.onInterim('');
     if (t) this.cb.onUtterance(t);
   }
