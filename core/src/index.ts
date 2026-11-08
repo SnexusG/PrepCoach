@@ -9,3 +9,4 @@ export * from './catalog';
 export * from './sessions';
 export * from './queries';
 export * from './javaRunner';
+export * from './problemRun';

@@ -27,8 +27,7 @@ import {
   ratingLabel,
   recordAttempt,
   recordHint,
-  recordTestRun,
-  runJavaTests,
+  runProblemTests,
   formatRunResult,
   renderContextMarkdown,
   seed,
@@ -245,16 +244,8 @@ program
   .description('compile and run Solution.java against tests.json (saves .results.json and updates the open attempt)')
   .option('--solution <file>', 'run this file as Solution.java instead (verify tests against a private reference; nothing is saved)')
   .action(async (slug, o) => {
-    const d = db();
-    getProblem(d, slug);
-    const files = problemFiles(slug);
-    if (!fs.existsSync(files.tests)) throw new Error(`No tests.json for "${slug}" yet — generate the problem files first.`);
-    const r = await runJavaTests(files.dir, { solutionFile: o.solution, timeoutMs: cfg.runner.perTestTimeoutMs });
-    if (!o.solution) {
-      fs.writeFileSync(files.results, JSON.stringify({ slug, ...r }, null, 2));
-      if (r.compiled) recordTestRun(d, slug, r.passed, r.total);
-    }
-    out({ slug, ...r }, () => formatRunResult(r));
+    const r = await runProblemTests(db(), cfg, slug, { solutionFile: o.solution });
+    out(r, () => formatRunResult(r));
     if (!r.allPassed) process.exitCode = 2;
   });
 
