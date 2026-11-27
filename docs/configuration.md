@@ -32,6 +32,8 @@ weighted average of topic ratings by `frequencyWeight × confidence`.
 | `reviewPassThreshold` | 0.6 | a review at or above this grows the interval (× ease); below resets it to 1 day and lowers ease |
 | `initialEase` / `minEase` / `maxEase` | 2.0 / 1.3 / 2.5 | SM-2-style interval multiplier |
 | `maxIntervalDays` | 60 | cap |
+| `struggle` | outcomeBelow 0.7 · hintLevelAtLeast 2 · approachBelow 0.5 · independenceBelow 0.5 | **only problems you struggled with are reviewed**: an attempt counts as a struggle if any test failed, you took a hint at this level or higher (2 = the pattern was named), the tutor scored `approach` or `independence` below these, or the outcome is below `outcomeBelow`. Clean solves are not scheduled |
+| `graduateAfterCleanReviews` | 1 | clean reviews in a row that take a problem out of the queue (a clean fresh re-solve also removes it) |
 
 ## `selection`
 | Key | Default | Meaning |

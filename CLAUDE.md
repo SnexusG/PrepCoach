@@ -92,17 +92,28 @@ Correctness is computed by the CLI from tests; independence is scaled by hints a
 Be honest and consistent — the rating is only useful if the rubric is calibrated.
 
 ## Weaknesses
-- A weakness is **specific and reusable**: "off-by-one on binary search bounds", "forgets visited set in BFS",
-  "doesn't state complexity unprompted", "uses `==` to compare Integer objects". Not "bad at graphs".
-- Before recording, check existing ones in the context (or `npx prep weakness list`) and **reuse the id**
-  when it's the same mistake (`--seen <id>`). New ones: `--weakness "Topic :: description"`
-  (topic `general` for topic-less).
+Two levels: the **weakness** is a general skill gap a coach would name; each **observation** carries the specific
+slip from this attempt as its note. Track the gap, keep the slip as evidence.
+- **Name the gap, not the incident.** Ask "what skill, if they had it, would have prevented this — and would it
+  show up on other problems?" Good: "not comfortable with the cost of operations on Java collections",
+  "doesn't pin down the problem's rules before planning", "loses track of loop bounds and indices".
+  Too specific (that's a *note*): "believes HashMap insertion is O(log n)", "took Sudoku boxes as every 3×3
+  window". Too vague: "bad at graphs", "makes mistakes".
+- Every weakness has an **area**: `complexity`, `java`, `understanding`, `edge-cases`, `algorithm`,
+  `implementation`, `testing`, `communication` (plus an optional DSA topic when it's truly topic-bound).
+- **Match before you create.** Check active/improving weaknesses in the context (or `npx prep weakness list`).
+  If the slip is an instance of an existing gap — even a differently-worded one in the same area — record it as
+  `--seen "ID: the specific slip"`. Create at most **one** new weakness per attempt:
+  `--weakness "area[/Topic] :: general description :: the specific slip"`.
 - When the user **clearly handles a logged weakness well** in a problem that tested it, unprompted, record
-  `--handled <id>`. The CLI moves it to improving and resolves it after 3 clean demonstrations; a relapse
-  re-activates it.
-- **Bring active weaknesses up naturally**: when a new problem's topic matches, a short heads-up before
-  coding ("last time you missed the empty-array case — keep it in mind"), without hinting at the approach.
-  General weaknesses (communication) can be reminded at the approach phase.
+  `--handled "ID: what they did right"`. The CLI moves it to improving and resolves it after 3 clean
+  demonstrations; a relapse re-activates it. General weaknesses get tested often — watch for them.
+- **Bring active weaknesses up naturally**: when a problem touches one, a short heads-up before coding that uses
+  a past note as the concrete example ("last time you priced a HashMap insert at log n — keep operation costs in
+  mind"), without hinting at the approach. Communication ones can be reminded at the approach phase.
+- **Consolidate** (at `/end`): if two weaknesses are the same gap, or one is really a single incident, propose
+  `npx prep weakness merge <ids> --into <id> [--description "…"] [--area …]` or
+  `npx prep weakness update <id> --description "…" --generalize` — and run it only after the user agrees.
 
 ## Command reference (`npx prep …`, add `--json` for machine output)
 ```
@@ -114,11 +125,13 @@ scaffold <slug> [--node graph|random]    creates problems/<slug>/ + notes.md
 tag <slug> --secondary "A,B" [--rating 1450]
 run-tests <slug> [--solution <file>]     --solution = verify tests with a private reference (nothing saved)
 hint <slug> [level]                      without level: show current level + next cost
-record-attempt <slug> --rubric "optimality=1,approach=0.8,codeQuality=0.9,communication=0.6"
-    [--hints N] [--weakness "Topic :: desc"]… [--seen ID]… [--handled ID]… --summary "…"
+record-attempt <slug> --rubric "optimality=1,approach=0.8,codeQuality=0.9,communication=0.6" [--hints N]
+    [--weakness "area[/Topic] :: general gap :: specific slip"]… [--seen "ID: slip"]… [--handled "ID: what went right"]…
+    --summary "…"
 abandon <slug> --summary "…"
-weakness list [--all] | weakness update <id> --status active|improving|resolved [--description "…"]
-weakness observe --weakness "…" | --seen ID | --handled ID
+weakness list [--all] · weakness areas · weakness merge <ids…> --into <id> [--description "…"] [--area <area>]
+weakness update <id> [--status active|improving|resolved] [--description "…" [--generalize]] [--area <area>] [--topic <t>|none]
+weakness observe --weakness "…" | --seen "ID: slip" | --handled "ID: what went right"
 reviews [--all] · stats · problem <slug> · sheets · set --sheet <id> --difficulty <level> [--target-date YYYY-MM-DD|none] · backup
 ```
 Run `npx prep` via the **Bash** tool (the slash commands pre-approve `Bash(npx prep:*)`). Prefer the `k=v`

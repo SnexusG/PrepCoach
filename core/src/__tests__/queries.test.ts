@@ -65,7 +65,7 @@ describe('next + sessions', () => {
     const past = new Date(2026, 9, 1);
     startAttempt(db, 'two-sum', { now: past });
     recordTestRun(db, 'two-sum', 10, 10, past);
-    recordAttempt(db, cfg, { slug: 'two-sum', rubric: perfect, now: past }); // due 2026-10-08
+    recordAttempt(db, cfg, { slug: 'two-sum', rubric: { ...perfect, approach: 0.3 }, now: past }); // struggled → due 2026-10-08
     startSession(db, 'dsa', now);
     const first = nextProblem(db, cfg, { now }).selection!;
     expect(first).toMatchObject({ slug: 'two-sum', isReview: true });
@@ -80,7 +80,7 @@ describe('context', () => {
     startSession(db, 'dsa', now);
     startAttempt(db, 'two-sum', { now });
     recordTestRun(db, 'two-sum', 10, 10, now);
-    recordAttempt(db, cfg, { slug: 'two-sum', rubric: perfect, weaknesses: [{ description: 'no complexity stated' }], now });
+    recordAttempt(db, cfg, { slug: 'two-sum', rubric: { ...perfect, approach: 0.3 }, weaknesses: [{ description: 'no complexity stated' }], now });
     startAttempt(db, 'valid-anagram', { now });
     abandonAttempt(db, cfg, 'valid-anagram', { now });
     const md = renderContextMarkdown(getContext(db, cfg, now));

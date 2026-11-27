@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { dashApi, fmtDate, fmtDelta, fmtMins, type Dashboard as DashData, type Difficulty, type TopicStat } from '../api';
+import { dashApi, fmtDate, fmtDelta, fmtMins, WEAKNESS_AREA_LABELS, type Dashboard as DashData, type Difficulty, type TopicStat } from '../api';
 import ForecastCard from '../components/ForecastCard';
 import NavBar from '../components/NavBar';
 import TutorPanel from '../components/TutorPanel';
@@ -223,25 +223,36 @@ function Weaknesses({ data }: { data: DashData }) {
           {data.stats.weaknesses.active} active · {data.stats.weaknesses.improving} improving · {data.stats.weaknesses.resolved} resolved
         </span>
       </div>
-      {data.weaknesses.length === 0 && <div className="empty">None logged yet — the tutor records specific, reusable mistakes here.</div>}
+      {data.weaknesses.length === 0 && <div className="empty">None logged yet — the tutor records the skill gaps behind your mistakes here.</div>}
       <ul className="wlist">
         {data.weaknesses.map((w) => (
           <li key={w.id}>
             <div>
               <span className={`wstatus ${w.status}`}>{w.status === 'active' ? '● active' : '◐ improving'}</span>
-              <span className="muted small"> {w.topic ?? 'general'}</span>
+              <span className="muted small">
+                {' '}
+                {w.area ? WEAKNESS_AREA_LABELS[w.area] ?? w.area : 'General'}
+                {w.topic ? ` · ${w.topic}` : ''}
+              </span>
             </div>
             <div>{w.description}</div>
             <div className="muted small">
               seen {w.timesObserved}× · last {fmtDate(w.lastSeen)}
               {w.status === 'improving' && ` · ${w.cleanDemonstrations} clean`}
-              {w.examples[0] && (
-                <>
-                  {' · '}
-                  <Link to={`/history?attempt=${w.examples[0].attemptId}`}>{w.examples[0].slug}</Link>
-                </>
-              )}
             </div>
+            {w.examples.length > 0 && (
+              <ul className="wexamples small">
+                {w.examples.slice(0, 2).map((e) => (
+                  <li key={e.attemptId}>
+                    <span className={e.kind === 'observed' ? 'muted' : 'st solved'}>{e.kind === 'observed' ? 'e.g.' : '✓'}</span>{' '}
+                    {e.note ?? e.summary ?? ''}{' '}
+                    <Link to={`/history?attempt=${e.attemptId}`} className="muted">
+                      ({e.slug})
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>
@@ -258,14 +269,16 @@ function Reviews({ data }: { data: DashData }) {
           {data.stats.reviews.due} due · {data.stats.reviews.upcoming7d} in the next 7 days
         </span>
       </div>
-      {data.reviews.length === 0 && <div className="empty">Nothing scheduled — solved problems come back here for spaced review.</div>}
+      {data.reviews.length === 0 && (
+        <div className="empty">Nothing to review. Problems you struggle with (failed tests, a pattern hint or more, heavy steering) come back here.</div>
+      )}
       <ul className="rlist">
         {data.reviews.map((r) => (
           <li key={r.slug}>
             <span className={`rdue ${r.due ? 'due' : ''}`}>{r.due ? 'due' : fmtDate(r.dueDate + 'T12:00:00')}</span>
             <Link to={`/problem/${r.slug}`}>{r.title}</Link>
             <span className="muted small">
-              {r.topic} · last {Math.round(r.lastOutcome * 100)}%
+              {r.topic} · last {Math.round(r.lastOutcome * 100)}%{r.reason ? ` · struggled: ${r.reason}` : ''}
             </span>
           </li>
         ))}

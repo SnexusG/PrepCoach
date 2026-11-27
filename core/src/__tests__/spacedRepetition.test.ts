@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../config';
-import { addDays, initialInterval, isDue, scheduleReview, toDateString, type ReviewState } from '../spacedRepetition';
+import { addDays, initialInterval, isDue, scheduleReview, struggleReasons, toDateString, type ReviewState } from '../spacedRepetition';
 
 const cfg = loadConfig();
 const today = new Date(2026, 10, 8); // 2026-11-08 local
@@ -45,6 +45,17 @@ describe('spaced repetition', () => {
   it('never drops ease below the minimum', () => {
     const prev: ReviewState = { intervalDays: 1, ease: 1.35, dueDate: '2026-11-08', lastOutcome: 0.2, reviewsCount: 5 };
     expect(scheduleReview(prev, 0.1, true, today, cfg).ease).toBe(1.3);
+  });
+
+  it('counts only real struggles', () => {
+    const clean = { outcome: 0.85, hintsUsed: 1, testsPassed: 14, testsTotal: 14, approach: 0.5, independence: 0.6 };
+    expect(struggleReasons(clean, cfg)).toEqual([]); // a nudge, a bit of probing: still a clean solve
+    expect(struggleReasons({ ...clean, testsPassed: 12 }, cfg)).toEqual(['tests 12/14']);
+    expect(struggleReasons({ ...clean, hintsUsed: 2 }, cfg)).toEqual(['hint level 2 (pattern)']);
+    expect(struggleReasons({ ...clean, approach: 0.4 }, cfg)).toEqual(['approach needed heavy steering (0.4)']);
+    expect(struggleReasons({ ...clean, independence: 0.3 }, cfg)).toEqual(['low independence (0.3)']);
+    expect(struggleReasons({ ...clean, outcome: 0.6 }, cfg)).toEqual(['outcome 0.60']);
+    expect(struggleReasons({ ...clean, independence: undefined, approach: undefined }, cfg)).toEqual([]);
   });
 
   it('handles month/year boundaries and due checks', () => {

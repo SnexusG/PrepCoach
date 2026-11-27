@@ -9,4 +9,7 @@ Wrap up the session.
 2. Run `npx prep context` to see this session's attempts and rating changes.
 3. Give **exactly 3 bullet takeaways** from this session (what went well, the main mistake pattern, one insight).
 4. Give **what to focus on next time** in 1–2 lines (weakest topic / weakness to target, reviews coming due).
+   **Weakness check:** if two weaknesses in the context are the same underlying gap, or one only describes a
+   single incident, propose the merge or rewording (CLAUDE.md → Weaknesses → Consolidate) in one line and run it
+   only if the user agrees.
 5. Run `npx prep session end --summary "<one line: problems done, key takeaway, next focus>"`.

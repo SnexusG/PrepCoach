@@ -6,13 +6,15 @@ import {
   computeOverallRating,
   getAttempt,
   problemStatuses,
+  pruneReviewQueue,
   recordAttempt,
   recordHint,
   recordTestRun,
   startAttempt,
   topicRatings,
 } from '../attempts';
-import { listWeaknesses } from '../weaknesses';
+import { getWeakness, listWeaknesses, mergeWeaknesses, updateWeakness } from '../weaknesses';
+import { weaknessesWithExamples } from '../queries';
 
 const cfg = loadConfig();
 const t0 = new Date(2026, 10, 8, 10, 0, 0);
@@ -79,8 +81,19 @@ describe('recordAttempt', () => {
     const a = getAttempt(db, r.attemptId);
     expect(a).toMatchObject({ status: 'completed', outcomeScore: 1, testsPassed: 15, testsTotal: 15, tutorSummary: 'clean two-pointer' });
 
+    // A clean solve is not scheduled for review.
+    expect(r.review).toMatchObject({ action: 'none', reasons: [] });
+    expect(db.prepare('SELECT * FROM review_queue WHERE problem_slug = ?').get('3sum')).toBeUndefined();
+  });
+
+  it('schedules a review only for a struggle, and says why', () => {
+    startAttempt(db, '3sum', { now: t0 });
+    recordTestRun(db, '3sum', 15, 15, t1);
+    const r = recordAttempt(db, cfg, { slug: '3sum', rubric: { ...perfect, approach: 0.3 }, now: t1 });
+    expect(r.review.action).toBe('scheduled');
+    expect(r.review.reasons).toEqual(['approach needed heavy steering (0.3)']);
     const q = db.prepare('SELECT * FROM review_queue WHERE problem_slug = ?').get('3sum');
-    expect(q).toMatchObject({ interval_days: 7, due_date: '2026-11-15' });
+    expect(q).toMatchObject({ interval_days: 7, due_date: '2026-11-15', reason: 'approach needed heavy steering (0.3)' });
   });
 
   it('applies logged hints as a cap even if the tutor passes fewer', () => {
@@ -93,16 +106,63 @@ describe('recordAttempt', () => {
     expect(r.outcome.score).toBe(0.7);
   });
 
-  it('a review counts at half weight and passing doubles the interval', () => {
+  it('a review counts at half weight, and a clean review graduates the problem', () => {
     startAttempt(db, 'two-sum', { now: t0 });
     recordTestRun(db, 'two-sum', 10, 10, t0);
-    recordAttempt(db, cfg, { slug: 'two-sum', rubric: perfect, now: t0 }); // interval 7
+    recordAttempt(db, cfg, { slug: 'two-sum', rubric: { ...perfect, independence: 0.3 }, now: t0 }); // struggled → queued
     startAttempt(db, 'two-sum', { isReview: true, now: t1 });
     recordTestRun(db, 'two-sum', 10, 10, t1);
     const r = recordAttempt(db, cfg, { slug: 'two-sum', rubric: perfect, now: t1 });
     expect(r.isReview).toBe(true);
     expect(r.changes[0].weight).toBe(0.5);
-    expect(r.review).toMatchObject({ intervalDays: 15, reviewsCount: 1 });
+    expect(r.review).toMatchObject({ action: 'graduated', cleanStreak: 1 });
+    expect(db.prepare('SELECT * FROM review_queue WHERE problem_slug = ?').get('two-sum')).toBeUndefined();
+  });
+
+  it('a review that still needs a pattern hint stays queued with a longer interval', () => {
+    startAttempt(db, 'two-sum', { now: t0 });
+    recordTestRun(db, 'two-sum', 6, 10, t0);
+    const first = recordAttempt(db, cfg, { slug: 'two-sum', rubric: perfect, now: t0 });
+    expect(first.review.reasons).toEqual(['tests 6/10']);
+    startAttempt(db, 'two-sum', { isReview: true, now: t1 });
+    recordHint(db, cfg, 'two-sum', 2, t1);
+    recordTestRun(db, 'two-sum', 10, 10, t1);
+    const r = recordAttempt(db, cfg, { slug: 'two-sum', rubric: perfect, now: t1 });
+    expect(r.review.action).toBe('scheduled');
+    expect(r.review.reasons).toEqual(['hint level 2 (pattern)']);
+    expect(r.review.state!.reviewsCount).toBe(1);
+    expect(r.review.state!.intervalDays).toBeGreaterThan(first.review.state!.intervalDays);
+  });
+
+  it('needs several clean reviews when graduateAfterCleanReviews > 1', () => {
+    const strict = { ...cfg, spacedRepetition: { ...cfg.spacedRepetition, graduateAfterCleanReviews: 2 } };
+    startAttempt(db, 'two-sum', { now: t0 });
+    recordTestRun(db, 'two-sum', 6, 10, t0);
+    recordAttempt(db, strict, { slug: 'two-sum', rubric: perfect, now: t0 });
+    for (const [i, expected] of (['scheduled', 'graduated'] as const).entries()) {
+      const at = new Date(t1.getTime() + i * 864e5);
+      startAttempt(db, 'two-sum', { isReview: true, now: at });
+      recordTestRun(db, 'two-sum', 10, 10, at);
+      expect(recordAttempt(db, strict, { slug: 'two-sum', rubric: perfect, now: at }).review.action).toBe(expected);
+    }
+  });
+
+  it('prunes clean solves already in the queue', () => {
+    startAttempt(db, 'two-sum', { now: t0 });
+    recordTestRun(db, 'two-sum', 10, 10, t0);
+    recordAttempt(db, cfg, { slug: 'two-sum', rubric: perfect, now: t0 });
+    startAttempt(db, '3sum', { now: t0 });
+    recordTestRun(db, '3sum', 15, 15, t0);
+    recordAttempt(db, cfg, { slug: '3sum', rubric: { ...perfect, approach: 0.2 }, now: t0 });
+    // Simulate a queue from before the struggle rule: a clean solve queued anyway.
+    db.prepare(
+      `INSERT INTO review_queue (problem_slug, due_date, interval_days, ease, last_outcome, reviews_count) VALUES ('two-sum', '2026-11-15', 7, 2, 1, 0)`,
+    ).run();
+    expect(pruneReviewQueue(db, cfg, { dryRun: true }).removed).toEqual([{ slug: 'two-sum' }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM review_queue').get()).toEqual({ n: 2 });
+    const r = pruneReviewQueue(db, cfg);
+    expect(r.kept).toEqual([{ slug: '3sum', reasons: ['approach needed heavy steering (0.2)'] }]);
+    expect((db.prepare('SELECT problem_slug AS s FROM review_queue').all() as { s: string }[]).map((x) => x.s)).toEqual(['3sum']);
   });
 
   it('fails cleanly without an open attempt', () => {
@@ -173,5 +233,46 @@ describe('weaknesses via recordAttempt', () => {
     ).toThrow(/Unknown dsa topic/);
     // the failed record rolled back: attempt still open, rating untouched
     expect(rating('Two Pointers').attempts).toBe(0);
+  });
+});
+
+describe('general weaknesses with specific notes', () => {
+  const solve = (slug: string, weaknesses: any[], at = t1) => {
+    startAttempt(db, slug, { now: t0 });
+    recordTestRun(db, slug, 10, 10, at);
+    return recordAttempt(db, cfg, { slug, rubric: perfect, weaknesses, now: at });
+  };
+  const notes = (id: number) =>
+    (db.prepare('SELECT note FROM weakness_attempts WHERE weakness_id = ? ORDER BY attempt_id').all(id) as { note: string | null }[]).map((r) => r.note);
+
+  it('keeps the general gap on the weakness and each slip as a note', () => {
+    const r1 = solve('two-sum', [
+      { description: 'not comfortable with the cost of Java collection operations', area: 'complexity', note: 'priced HashMap insert at O(log n)' },
+    ]);
+    const id = r1.weaknesses[0].id;
+    solve('3sum', [{ id, note: 'thought sorting a list is O(n)' }]);
+    expect(getWeakness(db, id)).toMatchObject({ area: 'complexity', timesObserved: 2 });
+    expect(notes(id)).toEqual(['priced HashMap insert at O(log n)', 'thought sorting a list is O(n)']);
+    const [w] = weaknessesWithExamples(db, 'dsa');
+    expect(w.examples.map((e) => e.note)).toEqual(['thought sorting a list is O(n)', 'priced HashMap insert at O(log n)']);
+  });
+
+  it('merges weaknesses: history, counts and old wording move to the target', () => {
+    const a = solve('two-sum', [{ description: 'rusty collections syntax', area: 'java', note: 'nums.size() on an array' }]).weaknesses[0].id;
+    const b = solve('3sum', [{ description: 'TreeSet comparator collapses equal counts' }]).weaknesses[0].id;
+    solve('number-of-islands', [{ id: a, kind: 'handled_well' }]); // a is improving, b is active
+    const merged = mergeWeaknesses(db, [b], a, { description: 'not yet fluent with the Java collections API and its semantics' });
+    expect(merged).toMatchObject({ id: a, area: 'java', timesObserved: 2, status: 'active', cleanDemonstrations: 0 });
+    expect(getWeakness(db, b)).toBeUndefined();
+    // a's own slip keeps its note; b's slip had none, so its old wording becomes the note; a clean demonstration gets none
+    expect(notes(a)).toEqual(['nums.size() on an array', 'TreeSet comparator collapses equal counts', null]);
+    expect(() => mergeWeaknesses(db, [a], a)).toThrow(/Nothing to merge/);
+  });
+
+  it('generalizing a description keeps the old wording as notes', () => {
+    const id = solve('two-sum', [{ description: 'believes HashMap insertion is O(log n)' }]).weaknesses[0].id;
+    const w = updateWeakness(db, id, { description: 'not comfortable with Java operation costs', area: 'complexity', generalize: true });
+    expect(w).toMatchObject({ description: 'not comfortable with Java operation costs', area: 'complexity' });
+    expect(notes(id)).toEqual(['believes HashMap insertion is O(log n)']);
   });
 });

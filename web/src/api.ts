@@ -147,15 +147,28 @@ export interface AttemptSummary {
   sessionId: number | null;
 }
 
+/** Display names of weakness areas (mirrors WEAKNESS_AREAS in core). */
+export const WEAKNESS_AREA_LABELS: Record<string, string> = {
+  complexity: 'Complexity analysis',
+  java: 'Java language & collections',
+  understanding: 'Problem understanding',
+  'edge-cases': 'Edge cases',
+  algorithm: 'Algorithm & pattern choice',
+  implementation: 'Implementation discipline',
+  testing: 'Testing & verification',
+  communication: 'Communication',
+};
+
 export interface Weakness {
   id: number;
   description: string;
   topic: string | null;
+  area: string | null;
   status: 'active' | 'improving' | 'resolved';
   timesObserved: number;
   cleanDemonstrations: number;
   lastSeen: string;
-  examples: { attemptId: number; slug: string; kind: string; date: string; summary: string | null }[];
+  examples: { attemptId: number; slug: string; kind: string; date: string; summary: string | null; note: string | null }[];
 }
 
 export interface ReviewItem {
@@ -166,6 +179,8 @@ export interface ReviewItem {
   dueDate: string;
   intervalDays: number;
   lastOutcome: number;
+  /** What you struggled with (why it's queued); null for older entries. */
+  reason: string | null;
   due: boolean;
 }
 
@@ -213,7 +228,7 @@ export interface AttemptDetail extends AttemptSummary {
   rubric: { input?: Record<string, number>; components?: Record<string, number>; raw?: number; cap?: number } | null;
   ratingChanges: { topic: string; isPrimary: boolean; ratingBefore: number; ratingAfter: number; expected: number; k: number; weight: number }[];
   hints: { level: number; givenAt: string }[];
-  weaknesses: { id: number; description: string; topic: string | null; status: string; kind: 'observed' | 'handled_well' }[];
+  weaknesses: { id: number; description: string; topic: string | null; area: string | null; status: string; kind: 'observed' | 'handled_well'; note: string | null }[];
   notes: string | null;
   solution: string | null;
 }

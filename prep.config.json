@@ -56,7 +56,9 @@
     "initialEase": 2.0,
     "minEase": 1.3,
     "maxEase": 2.5,
-    "maxIntervalDays": 60
+    "maxIntervalDays": 60,
+    "struggle": { "outcomeBelow": 0.7, "hintLevelAtLeast": 2, "approachBelow": 0.5, "independenceBelow": 0.5 },
+    "graduateAfterCleanReviews": 1
   },
   "selection": {
     "maxReviewsPerSession": 1,

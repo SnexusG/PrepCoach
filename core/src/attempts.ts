@@ -10,7 +10,7 @@ import {
   type OutcomeResult,
   type Rubric,
 } from './rating';
-import { scheduleReview, type ReviewState } from './spacedRepetition';
+import { scheduleReview, struggleReasons, type ReviewState } from './spacedRepetition';
 import { applyWeaknessObservations, type WeaknessChange, type WeaknessObservation } from './weaknesses';
 
 export interface ProblemRow {
@@ -211,6 +211,18 @@ export interface RatingChange {
   weight: number;
 }
 
+/** What the attempt did to the review queue. */
+export interface ReviewOutcome {
+  /** scheduled = (re)queued; graduated = removed after clean solving; none = clean solve, never queued. */
+  action: 'scheduled' | 'graduated' | 'none';
+  /** The schedule when queued. */
+  state: ReviewState | null;
+  /** Why this attempt counts as a struggle (empty for a clean solve). */
+  reasons: string[];
+  /** Clean reviews in a row (counts toward graduating). */
+  cleanStreak: number;
+}
+
 export interface RecordAttemptResult {
   attemptId: number;
   slug: string;
@@ -224,7 +236,7 @@ export interface RecordAttemptResult {
   changes: RatingChange[];
   overallBefore: number;
   overallAfter: number;
-  review: ReviewState;
+  review: ReviewOutcome;
   weaknesses: WeaknessChange[];
 }
 
@@ -313,20 +325,49 @@ export function recordAttempt(db: DB, cfg: PrepConfig, params: RecordAttemptPara
       attempt.id,
     );
 
-    // Spaced repetition.
+    // Spaced repetition — only for problems you actually struggled with.
     const prevRow = db
       .prepare(
         `SELECT interval_days AS intervalDays, ease, due_date AS dueDate, last_outcome AS lastOutcome,
-                reviews_count AS reviewsCount FROM review_queue WHERE problem_slug = ?`,
+                reviews_count AS reviewsCount, reason, clean_streak AS cleanStreak FROM review_queue WHERE problem_slug = ?`,
       )
-      .get(problem.slug) as ReviewState | undefined;
-    const review = scheduleReview(prevRow ?? null, outcome.score, attempt.isReview, now, cfg);
-    db.prepare(
-      `INSERT INTO review_queue (problem_slug, due_date, interval_days, ease, last_outcome, reviews_count)
-       VALUES (?, ?, ?, ?, ?, ?)
+      .get(problem.slug) as (ReviewState & { reason: string | null; cleanStreak: number }) | undefined;
+    const reasons = struggleReasons(
+      {
+        outcome: outcome.score,
+        hintsUsed,
+        testsPassed,
+        testsTotal,
+        approach: params.rubric.approach,
+        independence: params.rubric.independence,
+      },
+      cfg,
+    );
+    const upsert = db.prepare(
+      `INSERT INTO review_queue (problem_slug, due_date, interval_days, ease, last_outcome, reviews_count, reason, clean_streak)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(problem_slug) DO UPDATE SET due_date = excluded.due_date, interval_days = excluded.interval_days,
-         ease = excluded.ease, last_outcome = excluded.last_outcome, reviews_count = excluded.reviews_count`,
-    ).run(problem.slug, review.dueDate, review.intervalDays, review.ease, review.lastOutcome, review.reviewsCount);
+         ease = excluded.ease, last_outcome = excluded.last_outcome, reviews_count = excluded.reviews_count,
+         reason = excluded.reason, clean_streak = excluded.clean_streak`,
+    );
+    const dequeue = () => db.prepare('DELETE FROM review_queue WHERE problem_slug = ?').run(problem.slug);
+    let review: ReviewOutcome;
+    if (reasons.length) {
+      const state = scheduleReview(prevRow ?? null, outcome.score, attempt.isReview, now, cfg);
+      upsert.run(problem.slug, state.dueDate, state.intervalDays, state.ease, state.lastOutcome, state.reviewsCount, reasons.join('; '), 0);
+      review = { action: 'scheduled', state, reasons, cleanStreak: 0 };
+    } else if (prevRow && attempt.isReview && prevRow.cleanStreak + 1 < cfg.spacedRepetition.graduateAfterCleanReviews) {
+      // Clean review, but more clean ones are required before it leaves the queue.
+      const state = scheduleReview(prevRow, outcome.score, true, now, cfg);
+      const streak = prevRow.cleanStreak + 1;
+      upsert.run(problem.slug, state.dueDate, state.intervalDays, state.ease, state.lastOutcome, state.reviewsCount, prevRow.reason, streak);
+      review = { action: 'scheduled', state, reasons, cleanStreak: streak };
+    } else if (prevRow) {
+      dequeue(); // solved it cleanly: no more reviews needed
+      review = { action: 'graduated', state: null, reasons, cleanStreak: prevRow.cleanStreak + (attempt.isReview ? 1 : 0) };
+    } else {
+      review = { action: 'none', state: null, reasons, cleanStreak: 0 };
+    }
 
     const weaknesses = applyWeaknessObservations(db, cfg, track, attempt.id, params.weaknesses ?? [], now);
 
@@ -378,4 +419,54 @@ export function problemStatuses(
             : 'unsolved',
     lastAbandonedAt: r.lastAbandonedAt,
   }));
+}
+
+export interface PruneResult {
+  removed: { slug: string }[];
+  kept: { slug: string; reasons: string[] }[];
+}
+
+/**
+ * Applies the struggle rule to problems already in the review queue (queued before reviews were limited to
+ * struggles): each entry is judged by the problem's latest recorded attempt; clean ones are removed.
+ */
+export function pruneReviewQueue(db: DB, cfg: PrepConfig, opts: { dryRun?: boolean } = {}): PruneResult {
+  const rows = db
+    .prepare(
+      `SELECT q.problem_slug AS slug, a.outcome_score AS outcome, a.hints_used AS hintsUsed, a.tests_passed AS testsPassed,
+              a.tests_total AS testsTotal, a.rubric
+       FROM review_queue q
+       JOIN attempts a ON a.id = (SELECT id FROM attempts WHERE problem_slug = q.problem_slug AND status = 'completed'
+                                  ORDER BY id DESC LIMIT 1)`,
+    )
+    .all() as { slug: string; outcome: number; hintsUsed: number; testsPassed: number | null; testsTotal: number | null; rubric: string | null }[];
+  const result: PruneResult = { removed: [], kept: [] };
+  for (const r of rows) {
+    let input: { approach?: number; independence?: number } = {};
+    try {
+      input = r.rubric ? (JSON.parse(r.rubric).input ?? {}) : {};
+    } catch {
+      /* unreadable rubric: judge on outcome, hints and tests */
+    }
+    const reasons = struggleReasons(
+      {
+        outcome: r.outcome,
+        hintsUsed: r.hintsUsed,
+        testsPassed: r.testsPassed ?? 0,
+        testsTotal: r.testsTotal ?? 0,
+        approach: input.approach,
+        independence: input.independence,
+      },
+      cfg,
+    );
+    if (reasons.length) result.kept.push({ slug: r.slug, reasons });
+    else result.removed.push({ slug: r.slug });
+  }
+  if (!opts.dryRun) {
+    db.transaction(() => {
+      for (const r of result.removed) db.prepare('DELETE FROM review_queue WHERE problem_slug = ?').run(r.slug);
+      for (const k of result.kept) db.prepare('UPDATE review_queue SET reason = ? WHERE problem_slug = ?').run(k.reasons.join('; '), k.slug);
+    })();
+  }
+  return result;
 }

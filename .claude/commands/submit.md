@@ -18,12 +18,16 @@ Review and record the user's solution. Arguments: `$ARGUMENTS`
 3. **Ask 1–2 follow-up questions** (e.g. "what if the input were streamed?", "what if values were huge?",
    "can you do it in O(1) space?"). Wait for answers before recording; their answers count toward
    communication.
-4. **Record.** Pick rubric scores using the calibration table in CLAUDE.md. Check active weaknesses (with ids)
-   in the context: `--seen <id>` for repeats, `--handled <id>` for ones this problem tested that they handled
-   cleanly unprompted, `--weakness "Topic :: description"` for genuinely new, specific ones. Then run:
-   `npx prep record-attempt <slug> --rubric "optimality=…,approach=…,codeQuality=…,communication=…" [--seen ID] [--handled ID] [--weakness "…"] --summary "<1–2 sentences: approach, outcome, key mistake>"`
+4. **Record.** Pick rubric scores using the calibration table in CLAUDE.md. For each mistake, name the general
+   skill gap behind it (CLAUDE.md → Weaknesses) and match it to an active weakness first:
+   `--seen "ID: the specific slip"` for an instance of an existing gap, `--handled "ID: what they did right"`
+   for one this problem tested that they handled cleanly unprompted, and at most one
+   `--weakness "area[/Topic] :: general gap :: the specific slip"` for a gap nobody has logged yet. Then run:
+   `npx prep record-attempt <slug> --rubric "optimality=…,approach=…,codeQuality=…,communication=…" [--seen "ID: …"] [--handled "ID: …"] [--weakness "…"] --summary "<1–2 sentences: approach, outcome, key mistake>"`
    (hints are taken from the log automatically).
-5. **Report the rating change in one line** using the CLI's numbers (e.g. "Linked List 1236 → 1251 (+15), next review Nov 15").
+5. **Report the rating change in one line** using the CLI's numbers (e.g. "Linked List 1236 → 1251 (+15), review Nov 15
+   since you needed the pattern hint"). Only struggles are reviewed: say "no review needed" for a clean solve, and
+   "that one's off your review list" when the CLI says it graduated.
    Mention weakness status changes briefly.
 6. **Append takeaways** to `problems/<slug>/notes.md`: date, outcome, approach used, complexity, mistakes,
    key insight, follow-up answers — 4–6 bullets.

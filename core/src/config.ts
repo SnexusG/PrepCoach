@@ -42,6 +42,10 @@ export interface PrepConfig {
     minEase: number;
     maxEase: number;
     maxIntervalDays: number;
+    /** An attempt is a struggle (and the problem gets reviewed) if any of these holds, or not all tests passed. */
+    struggle: { outcomeBelow: number; hintLevelAtLeast: number; approachBelow: number; independenceBelow: number };
+    /** Clean reviews in a row that take a problem out of the review queue. */
+    graduateAfterCleanReviews: number;
   };
   selection: {
     maxReviewsPerSession: number;
@@ -175,6 +179,18 @@ export function validateConfig(cfg: PrepConfig): void {
   if (cfg.spacedRepetition.lowThreshold > cfg.spacedRepetition.highThreshold) {
     errors.push('spacedRepetition.lowThreshold must be <= highThreshold');
   }
+  const st = cfg.spacedRepetition.struggle;
+  if (!st) errors.push('spacedRepetition.struggle is missing');
+  else {
+    for (const k of ['outcomeBelow', 'approachBelow', 'independenceBelow'] as const) {
+      if (!(st[k] >= 0 && st[k] <= 1)) errors.push(`spacedRepetition.struggle.${k} must be between 0 and 1`);
+    }
+    if (!(Number.isInteger(st.hintLevelAtLeast) && st.hintLevelAtLeast >= 1 && st.hintLevelAtLeast <= 5)) {
+      errors.push('spacedRepetition.struggle.hintLevelAtLeast must be an integer 1–5 (5 = hints never count)');
+    }
+  }
+  const g = cfg.spacedRepetition.graduateAfterCleanReviews;
+  if (!(Number.isInteger(g) && g >= 1)) errors.push('spacedRepetition.graduateAfterCleanReviews must be an integer >= 1');
   const f = cfg.forecast;
   if (!f) errors.push('forecast section is missing');
   else {

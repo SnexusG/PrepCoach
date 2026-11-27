@@ -24,6 +24,31 @@ export function addDays(d: Date, days: number): Date {
   return r;
 }
 
+export interface StruggleInput {
+  outcome: number;
+  hintsUsed: number;
+  testsPassed: number;
+  testsTotal: number;
+  /** Tutor rubric scores (0–1); independence defaults to 1 when the tutor didn't score it. */
+  approach?: number;
+  independence?: number;
+}
+
+/**
+ * Why an attempt counts as a real struggle (empty = a clean solve). Only struggled problems are scheduled for
+ * review; a clean solve of a problem already in the queue counts toward graduating it out.
+ */
+export function struggleReasons(a: StruggleInput, cfg: PrepConfig): string[] {
+  const s = cfg.spacedRepetition.struggle;
+  const reasons: string[] = [];
+  if (a.testsTotal > 0 && a.testsPassed < a.testsTotal) reasons.push(`tests ${a.testsPassed}/${a.testsTotal}`);
+  if (a.hintsUsed >= s.hintLevelAtLeast) reasons.push(`hint level ${a.hintsUsed} (${cfg.rating.hintNames[a.hintsUsed] ?? ''})`.replace(' ()', ''));
+  if (a.approach != null && a.approach < s.approachBelow) reasons.push(`approach needed heavy steering (${a.approach})`);
+  if ((a.independence ?? 1) < s.independenceBelow) reasons.push(`low independence (${a.independence})`);
+  if (a.outcome < s.outcomeBelow) reasons.push(`outcome ${a.outcome.toFixed(2)}`);
+  return reasons;
+}
+
 export function initialInterval(outcome: number, cfg: PrepConfig): number {
   const sr = cfg.spacedRepetition;
   if (outcome < sr.lowThreshold) return sr.initialIntervals.low;

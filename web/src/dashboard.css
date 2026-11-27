@@ -129,6 +129,8 @@ input.filter {
 /* lists */
 .wlist, .rlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
 .wlist li { border-left: 2px solid var(--border); padding-left: 10px; }
+.wlist .wexamples { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.wlist .wexamples li { border-left: none; padding-left: 0; color: var(--text); opacity: 0.85; }
 .wstatus { font-size: 12px; font-weight: 600; }
 .wstatus.active { color: var(--warn); }
 .wstatus.improving { color: var(--accent); }

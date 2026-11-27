@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Link, useSearchParams } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
-import { dashApi, fmtDate, fmtDateTime, fmtDelta, fmtMins, type AttemptDetail, type AttemptSummary } from '../api';
+import { dashApi, fmtDate, fmtDateTime, fmtDelta, fmtMins, WEAKNESS_AREA_LABELS, type AttemptDetail, type AttemptSummary } from '../api';
 import NavBar from '../components/NavBar';
 import { useTutor } from '../tutor/TutorContext';
 import { usePolling } from '../usePolling';
@@ -111,8 +111,9 @@ function Detail({ id, onClose }: { id: number; onClose: () => void }) {
           ))}
           {d.weaknesses.map((w) => (
             <div key={w.id} className="small">
-              {w.kind === 'observed' ? '⚠ slipped:' : '✓ handled well:'} {w.description}{' '}
-              <span className="muted">({w.topic ?? 'general'} · {w.status})</span>
+              {w.kind === 'observed' ? '⚠ slipped:' : '✓ handled well:'} {w.description}
+              {w.note && <span> — {w.note}</span>}{' '}
+              <span className="muted">({w.area ? WEAKNESS_AREA_LABELS[w.area] ?? w.area : (w.topic ?? 'general')} · {w.status})</span>
             </div>
           ))}
         </section>

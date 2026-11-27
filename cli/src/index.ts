@@ -35,6 +35,7 @@ import {
   problemFiles,
   ratingLabel,
   recordAttempt,
+  pruneReviewQueue,
   recordHint,
   runProblemTests,
   formatRunResult,
@@ -49,6 +50,9 @@ import {
   tagProblem,
   updateWeakness,
   weaknessesWithExamples,
+  mergeWeaknesses,
+  parseArea,
+  WEAKNESS_AREAS,
   applyWeaknessObservations,
   type Difficulty,
   type DB,
@@ -101,7 +105,11 @@ function parseObjectArg(raw: string, what: string): any {
 
 const collect = (v: string, prev: string[]) => [...prev, v];
 
-/** Builds weakness observations from --weaknesses JSON plus the shell-safe flags. */
+/**
+ * Builds weakness observations from --weaknesses JSON plus the shell-safe flags:
+ *   --weakness "area[/Topic] :: general description [:: the specific slip]"   (old style "Topic :: description" still works)
+ *   --seen "ID[: the specific slip]"   --handled "ID[: what they did right]"
+ */
 function weaknessObservations(o: { weaknesses?: string; weakness?: string[]; seen?: string[]; handled?: string[] }): WeaknessObservation[] {
   const obs: WeaknessObservation[] = [];
   if (o.weaknesses) {
@@ -110,15 +118,32 @@ function weaknessObservations(o: { weaknesses?: string; weakness?: string[]; see
     obs.push(...parsed);
   }
   for (const w of o.weakness ?? []) {
-    const idx = w.indexOf('::');
-    if (idx < 0) throw new Error(`--weakness "${w}" must look like "Topic :: description" (use "general :: …" for topic-less)`);
-    const topic = w.slice(0, idx).trim();
-    obs.push({ description: w.slice(idx + 2).trim(), topic: /^general$/i.test(topic) ? null : topic, kind: 'observed' });
+    const parts = w.split('::').map((x) => x.trim());
+    if (parts.length < 2 || !parts[1]) {
+      throw new Error(`--weakness "${w}" must look like "area[/Topic] :: general description [:: specific slip]" (areas: ${Object.keys(WEAKNESS_AREAS).join(', ')})`);
+    }
+    const [head, description, note] = parts;
+    const [first, topicPart] = head.split('/').map((x) => x.trim());
+    const area = parseArea(first);
+    const topic = area ? topicPart || null : /^general$/i.test(first) ? null : first; // old style: head is the topic
+    obs.push({ description, topic, area, note: note || null, kind: 'observed' });
   }
-  for (const id of o.seen ?? []) obs.push({ id: Number(id), kind: 'observed' });
-  for (const id of o.handled ?? []) obs.push({ id: Number(id), kind: 'handled_well' });
+  const idNote = (v: string, flag: string) => {
+    const m = /^\s*#?(\d+)\s*(?::\s*([\s\S]*))?$/.exec(v);
+    if (!m) throw new Error(`${flag} "${v}" must look like "ID" or "ID: what happened"`);
+    return { id: Number(m[1]), note: m[2]?.trim() || null };
+  };
+  for (const v of o.seen ?? []) obs.push({ ...idNote(v, '--seen'), kind: 'observed' });
+  for (const v of o.handled ?? []) obs.push({ ...idNote(v, '--handled'), kind: 'handled_well' });
   return obs;
 }
+
+const requireArea = (v: string) => {
+  if (/^(none|null)$/i.test(v)) return null;
+  const a = parseArea(v);
+  if (!a) throw new Error(`Unknown area "${v}". Areas: ${Object.keys(WEAKNESS_AREAS).join(', ')}`);
+  return a;
+};
 
 const parseDifficulty = (v: string): Difficulty => {
   const d = v.toLowerCase() as Difficulty;
@@ -292,9 +317,9 @@ program
   .requiredOption('--rubric <json>', 'optimality, approach, codeQuality, communication [, independence, correctness] in 0..1 (JSON, @file, or k=v,k=v)')
   .option('--hints <n>', 'hint level used (defaults to the logged level)', Number)
   .option('--weaknesses <json>', 'JSON array of {id?|description, topic?, kind?: observed|handled_well}')
-  .option('--weakness <"Topic :: description">', 'new or re-observed weakness by description (repeatable; topic "general" = none)', collect, [])
-  .option('--seen <id>', 'existing weakness observed again (repeatable)', collect, [])
-  .option('--handled <id>', 'existing weakness handled well this time (repeatable)', collect, [])
+  .option('--weakness <"area[/Topic] :: general description :: specific slip">', 'new general weakness, with this attempt\'s slip as the note (repeatable)', collect, [])
+  .option('--seen <"ID: slip">', 'existing weakness observed again, with what happened (repeatable)', collect, [])
+  .option('--handled <"ID: what went right">', 'existing weakness handled well this time (repeatable)', collect, [])
   .option('--summary <text>', 'one-paragraph tutor summary')
   .option('--tests-passed <n>', 'override tests passed (defaults to latest run)', Number)
   .option('--tests-total <n>', 'override tests total (defaults to latest run)', Number)
@@ -326,7 +351,16 @@ program
         L.push(`  secondary ${c.topic}: ${Math.round(c.before)} → ${Math.round(c.after)} (${sign(c.delta)})`);
       }
       L.push(`Overall DSA: ${Math.round(r.overallBefore)} → ${Math.round(r.overallAfter)} (${ratingLabel(r.overallAfter, cfg)})`);
-      L.push(`Next review: ${r.review.dueDate} (in ${r.review.intervalDays}d)`);
+      if (r.review.action === 'scheduled' && r.review.state) {
+        L.push(
+          `Review on ${r.review.state.dueDate} (in ${r.review.state.intervalDays}d)` +
+            (r.review.reasons.length ? ` — struggled: ${r.review.reasons.join(', ')}` : ` — clean review ${r.review.cleanStreak}, more needed to graduate`),
+        );
+      } else if (r.review.action === 'graduated') {
+        L.push('Solved cleanly — taken out of the review queue.');
+      } else {
+        L.push('Clean solve — no review scheduled.');
+      }
       for (const w of r.weaknesses) {
         L.push(`Weakness #${w.id} "${w.description}": ${w.action} → ${w.status} (seen ${w.timesObserved}×, clean ${w.cleanDemonstrations}×)`);
       }
@@ -355,8 +389,8 @@ weakness
     out(rows, () =>
       rows.length
         ? rows.flatMap((w) => [
-            `#${w.id} [${w.topic ?? 'general'}] ${w.description} — ${w.status}, seen ${w.timesObserved}×, clean ${w.cleanDemonstrations}×, last ${w.lastSeen.slice(0, 10)}`,
-            ...w.examples.map((e) => `    ${e.kind} on ${e.slug} (${e.date.slice(0, 10)})`),
+            `#${w.id} [${w.area ?? 'no area'}${w.topic ? ` · ${w.topic}` : ''}] ${w.description} — ${w.status}, seen ${w.timesObserved}×, clean ${w.cleanDemonstrations}×, last ${w.lastSeen.slice(0, 10)}`,
+            ...w.examples.map((e) => `    ${e.kind === 'observed' ? 'seen' : 'handled well'} on ${e.slug} (${e.date.slice(0, 10)})${e.note ? `: ${e.note}` : ''}`),
           ])
         : 'No weaknesses logged.',
     );
@@ -365,18 +399,40 @@ weakness
   .command('update <id>')
   .option('--status <status>', 'active | improving | resolved')
   .option('--description <text>', 'reword the weakness')
+  .option('--generalize', 'with --description: keep the old (specific) wording as the note on past observations')
+  .option('--area <area>', `set the area (${Object.keys(WEAKNESS_AREAS).join(', ')})`)
+  .option('--topic <topic>', 'tie it to a DSA topic ("none" = not topic-bound)')
   .action((id, o) => {
     if (o.status && !['active', 'improving', 'resolved'].includes(o.status)) throw new Error('Bad --status');
-    const w = updateWeakness(db(), Number(id), { status: o.status, description: o.description });
-    out(w, () => `#${w.id} ${w.description} — ${w.status}`);
+    const area = o.area === undefined ? undefined : requireArea(o.area);
+    const topic = o.topic === undefined ? undefined : /^(none|general)$/i.test(o.topic) ? null : o.topic;
+    const w = updateWeakness(db(), Number(id), { status: o.status, description: o.description, area, topic, generalize: o.generalize });
+    out(w, () => `#${w.id} [${w.area ?? 'no area'}] ${w.description} — ${w.status}`);
   });
+weakness
+  .command('merge <ids...>')
+  .description('merge weaknesses into one general weakness (observations, counts and old wording as notes move over)')
+  .requiredOption('--into <id>', 'the weakness to keep')
+  .option('--description <text>', 'reword the kept weakness')
+  .option('--area <area>', `set its area (${Object.keys(WEAKNESS_AREAS).join(', ')})`)
+  .action((ids: string[], o) => {
+    const w = mergeWeaknesses(db(), ids.map(Number), Number(o.into), {
+      description: o.description,
+      area: o.area === undefined ? undefined : requireArea(o.area),
+    });
+    out(w, () => `Merged into #${w.id} [${w.area ?? 'no area'}] ${w.description} — ${w.status}, seen ${w.timesObserved}×`);
+  });
+weakness
+  .command('areas')
+  .description('the areas a weakness can belong to')
+  .action(() => out(WEAKNESS_AREAS, () => Object.entries(WEAKNESS_AREAS).map(([k, v]) => `${k.padEnd(15)} ${v}`)));
 weakness
   .command('observe')
   .description('log an observation outside of record-attempt (e.g. during a discussion)')
   .option('--weaknesses <json>', 'JSON array, same format as record-attempt')
-  .option('--weakness <"Topic :: description">', 'repeatable', collect, [])
-  .option('--seen <id>', 'repeatable', collect, [])
-  .option('--handled <id>', 'repeatable', collect, [])
+  .option('--weakness <"area[/Topic] :: general description :: specific slip">', 'repeatable', collect, [])
+  .option('--seen <"ID: slip">', 'repeatable', collect, [])
+  .option('--handled <"ID: what went right">', 'repeatable', collect, [])
   .action((o) => {
     const obs = weaknessObservations(o);
     if (!obs.length) throw new Error('Nothing to record');
@@ -390,13 +446,24 @@ program
   .command('reviews')
   .description('spaced-repetition queue')
   .option('--all', 'show the whole queue, not just due + next 7 days')
+  .option('--prune', 'remove problems you solved cleanly (judged by their latest attempt); only struggles stay queued')
+  .option('--dry-run', 'with --prune: show what would be removed without changing anything')
   .action((o) => {
+    if (o.prune) {
+      const r = pruneReviewQueue(db(), cfg, { dryRun: o.dryRun });
+      return out(r, () => [
+        `${o.dryRun ? 'Would remove' : 'Removed'} ${r.removed.length} clean solve(s)${r.removed.length ? `: ${r.removed.map((x) => x.slug).join(', ')}` : ''}.`,
+        r.kept.length ? `Kept ${r.kept.length}:` : 'Nothing you struggled with is queued.',
+        ...r.kept.map((k) => `  ${k.slug} — ${k.reasons.join(', ')}`),
+      ]);
+    }
     const rows = listReviews(db(), new Date(), o.all ? {} : { withinDays: 7 });
     out(rows, () =>
       rows.length
         ? rows.map(
             (r) =>
-              `${r.due ? 'DUE ' : '    '}${r.dueDate}  ${r.slug} (${r.topic}, ${r.difficulty}) · interval ${r.intervalDays}d · last ${r.lastOutcome.toFixed(2)} · reviews ${r.reviewsCount}`,
+              `${r.due ? 'DUE ' : '    '}${r.dueDate}  ${r.slug} (${r.topic}, ${r.difficulty}) · interval ${r.intervalDays}d · last ${r.lastOutcome.toFixed(2)} · reviews ${r.reviewsCount}` +
+                (r.reason ? ` · why: ${r.reason}` : ''),
           )
         : 'Review queue is empty.',
     );

@@ -125,6 +125,8 @@ export interface ReviewItem {
   intervalDays: number;
   lastOutcome: number;
   reviewsCount: number;
+  /** Why it's being reviewed (what you struggled with); null for entries from before reasons were stored. */
+  reason: string | null;
   due: boolean;
 }
 
@@ -134,7 +136,7 @@ export function listReviews(db: DB, now = new Date(), opts: { withinDays?: numbe
   const rows = db
     .prepare(
       `SELECT q.problem_slug AS slug, p.title, t.name AS topic, p.difficulty, q.due_date AS dueDate,
-              q.interval_days AS intervalDays, q.last_outcome AS lastOutcome, q.reviews_count AS reviewsCount
+              q.interval_days AS intervalDays, q.last_outcome AS lastOutcome, q.reviews_count AS reviewsCount, q.reason
        FROM review_queue q JOIN problems p ON p.slug = q.problem_slug JOIN topics t ON t.id = p.topic_id
        WHERE q.due_date <= ? ORDER BY q.due_date, q.last_outcome`,
     )
@@ -354,13 +356,13 @@ export function getStats(db: DB, cfg: PrepConfig, now = new Date()): Stats {
 // ---------- weakness examples ----------
 
 export interface WeaknessWithExamples extends WeaknessRow {
-  examples: { attemptId: number; slug: string; kind: string; date: string; summary: string | null }[];
+  examples: { attemptId: number; slug: string; kind: string; date: string; summary: string | null; note: string | null }[];
 }
 
 export function weaknessesWithExamples(db: DB, track: Track, statuses?: WeaknessRow['status'][]): WeaknessWithExamples[] {
   const ex = db.prepare(
     `SELECT wa.attempt_id AS attemptId, a.problem_slug AS slug, wa.kind, COALESCE(a.finished_at, a.started_at) AS date,
-            a.tutor_summary AS summary
+            a.tutor_summary AS summary, wa.note
      FROM weakness_attempts wa JOIN attempts a ON a.id = wa.attempt_id
      WHERE wa.weakness_id = ? ORDER BY a.id DESC LIMIT 3`,
   );
@@ -480,11 +482,11 @@ export function renderContextMarkdown(c: ContextData): string {
   if (!c.weaknesses.length) L.push('- None logged yet.');
   for (const w of c.weaknesses) {
     L.push(
-      `- #${w.id} [${w.topic ?? 'general'}] **${w.description}** — ${w.status}, seen ${w.timesObserved}×, last ${day(w.lastSeen)}` +
+      `- #${w.id} [${w.area ?? 'no area'}${w.topic ? ` · ${w.topic}` : ''}] **${w.description}** — ${w.status}, seen ${w.timesObserved}×, last ${day(w.lastSeen)}` +
         (w.status === 'improving' ? `, clean ${w.cleanDemonstrations}×` : ''),
     );
     for (const e of w.examples.slice(0, 2)) {
-      L.push(`  - ${e.kind === 'observed' ? 'seen on' : 'handled well on'} ${e.slug} (${day(e.date)})${e.summary ? `: ${e.summary}` : ''}`);
+      L.push(`  - ${e.kind === 'observed' ? 'seen on' : 'handled well on'} ${e.slug} (${day(e.date)}): ${e.note ?? e.summary ?? ''}`);
     }
   }
   L.push('');
@@ -517,7 +519,9 @@ export function renderContextMarkdown(c: ContextData): string {
 
   L.push('## Reviews');
   if (!c.reviewsDue.length) L.push('- None due today.');
-  for (const r of c.reviewsDue) L.push(`- DUE: ${r.slug} (${r.topic}) since ${r.dueDate}, last outcome ${r.lastOutcome.toFixed(2)}`);
+  for (const r of c.reviewsDue) {
+    L.push(`- DUE: ${r.slug} (${r.topic}) since ${r.dueDate}, last outcome ${r.lastOutcome.toFixed(2)}${r.reason ? ` — struggled: ${r.reason}` : ''}`);
+  }
   if (c.reviewsUpcoming.length) L.push(`- Upcoming (7d): ${c.reviewsUpcoming.map((r) => `${r.slug} ${r.dueDate}`).join(', ')}`);
 
   if (c.suggestions.length) {
@@ -539,7 +543,7 @@ export interface AttemptDetail extends AttemptSummary {
   } | null;
   ratingChanges: { topic: string; isPrimary: boolean; ratingBefore: number; ratingAfter: number; expected: number; k: number; weight: number }[];
   hints: { level: number; givenAt: string }[];
-  weaknesses: { id: number; description: string; topic: string | null; status: string; kind: 'observed' | 'handled_well' }[];
+  weaknesses: { id: number; description: string; topic: string | null; area: string | null; status: string; kind: 'observed' | 'handled_well'; note: string | null }[];
 }
 
 export function attemptDetail(db: DB, id: number, cfg?: PrepConfig): AttemptDetail {
@@ -568,7 +572,7 @@ export function attemptDetail(db: DB, id: number, cfg?: PrepConfig): AttemptDeta
   const hints = db.prepare('SELECT level, given_at AS givenAt FROM hint_log WHERE attempt_id = ? ORDER BY level').all(id) as AttemptDetail['hints'];
   const weaknesses = db
     .prepare(
-      `SELECT w.id, w.description, t.name AS topic, w.status, wa.kind
+      `SELECT w.id, w.description, t.name AS topic, w.area, w.status, wa.kind, wa.note
        FROM weakness_attempts wa JOIN weaknesses w ON w.id = wa.weakness_id LEFT JOIN topics t ON t.id = w.topic_id
        WHERE wa.attempt_id = ? ORDER BY wa.kind, w.id`,
     )
