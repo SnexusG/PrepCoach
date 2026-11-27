@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { dashApi, fmtDate, type Dashboard } from '../api';
+import { dashApi, fmtDate, fmtDay, forecastHeadline, type Dashboard } from '../api';
 import NavBar from '../components/NavBar';
 import TutorPanel from '../components/TutorPanel';
 import { useTutor } from '../tutor/TutorContext';
@@ -62,6 +62,7 @@ function DsaCard({ data }: { data: Dashboard | null }) {
       </div>
       {!t.connected && <p className="muted small">Connecting to the tutor…</p>}
       {busy && <p className="muted small">The tutor is working — follow along on the right.</p>}
+      {data && <ForecastLine data={data} />}
       {data && (
         <div className="home-facts">
           <span>
@@ -82,6 +83,27 @@ function DsaCard({ data }: { data: Dashboard | null }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** One line on when the sheet will be done, linking to the full forecast. */
+function ForecastLine({ data }: { data: Dashboard }) {
+  const f = data.stats.forecast;
+  const t = f.target;
+  return (
+    <p className="home-forecast">
+      <span>{forecastHeadline(f, data.stats.prefs.sheetName)}</span>
+      {f.status === 'ok' && <span className="muted"> ({f.perWeek} a week)</span>}
+      {t && !t.passed && f.status !== 'complete' && (
+        <span className={t.onTrack ? 'st solved' : 'st partial'}>
+          {' '}
+          · goal {fmtDay(t.date)}: {t.onTrack ? 'on track' : t.onTrack === false ? `behind, needs ${t.requiredPerWeek}/week` : `needs ${t.requiredPerWeek}/week`}
+        </span>
+      )}{' '}
+      <Link to="/dashboard" className="small">
+        Forecast →
+      </Link>
+    </p>
   );
 }
 

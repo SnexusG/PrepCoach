@@ -5,6 +5,8 @@ export * from './spacedRepetition';
 export * from './selection';
 export * from './weaknesses';
 export * from './attempts';
+export * from './activity';
+export * from './forecast';
 export * from './catalog';
 export * from './sessions';
 export * from './queries';

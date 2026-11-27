@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { dashApi, fmtDate, fmtDelta, fmtMins, type Dashboard as DashData, type Difficulty, type TopicStat } from '../api';
+import ForecastCard from '../components/ForecastCard';
 import NavBar from '../components/NavBar';
 import TutorPanel from '../components/TutorPanel';
 import { useTutor } from '../tutor/TutorContext';
@@ -312,7 +313,7 @@ function Recent({ data }: { data: DashData }) {
                 <td className="num">{a.outcomeScore == null ? '—' : `${Math.round(a.outcomeScore * 100)}%`}</td>
                 <td className={`num ${a.ratingDelta == null ? '' : a.ratingDelta >= 0 ? 'up' : 'down'}`}>{fmtDelta(a.ratingDelta)}</td>
                 <td className="num">{a.hintsUsed}</td>
-                <td className="num">{fmtMins(a.solveTimeSec)}</td>
+                <td className="num" title={a.activeTimeSec == null ? 'Recorded before active-time tracking' : 'Active time'}>{fmtMins(a.activeTimeSec)}</td>
               </tr>
             ))}
           </tbody>
@@ -337,7 +338,7 @@ export function StatusText({ a }: { a: { status: string; testsPassed: number | n
 
 export default function Dashboard() {
   const { turns } = useTutor();
-  const { data, error } = usePolling(dashApi.dashboard, 5000, [turns]);
+  const { data, error, refresh } = usePolling(dashApi.dashboard, 5000, [turns]);
 
   return (
     <div className="dash-page">
@@ -374,6 +375,8 @@ export default function Dashboard() {
                   {data.stats.attempts.completed}
                 </Tile>
               </div>
+
+              <ForecastCard data={data} onChanged={refresh} />
 
               <div className="grid2">
                 <RatingChart data={data} />

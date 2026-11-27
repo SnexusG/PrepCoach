@@ -56,7 +56,8 @@ function Detail({ id, onClose }: { id: number; onClose: () => void }) {
         <div><label>Result</label><StatusText a={d} /></div>
         <div><label>Outcome</label>{d.outcomeScore == null ? '—' : `${Math.round(d.outcomeScore * 100)}%`}</div>
         <div><label>Rating Δ</label><span className={d.ratingDelta == null ? '' : d.ratingDelta >= 0 ? 'up' : 'down'}>{fmtDelta(d.ratingDelta)}</span></div>
-        <div><label>Time</label>{fmtMins(d.solveTimeSec)}</div>
+        <div title={d.activeTimeSec == null ? 'Recorded before active-time tracking' : 'Breaks excluded'}><label>Active time</label>{fmtMins(d.activeTimeSec)}</div>
+        <div title="From starting the problem to submitting it"><label>Start → finish</label>{fmtMins(d.solveTimeSec)}</div>
         <div><label>Hints</label>{d.hintsUsed}</div>
         <div><label>Started</label>{fmtDateTime(d.startedAt)}</div>
       </div>
@@ -237,7 +238,7 @@ export default function History() {
                     <td className="num">{a.outcomeScore == null ? '—' : `${Math.round(a.outcomeScore * 100)}%`}</td>
                     <td className={`num ${a.ratingDelta == null ? '' : a.ratingDelta >= 0 ? 'up' : 'down'}`}>{fmtDelta(a.ratingDelta)}</td>
                     <td className="num">{a.hintsUsed}</td>
-                    <td className="num">{fmtMins(a.solveTimeSec)}</td>
+                    <td className="num" title={a.activeTimeSec == null ? 'Recorded before active-time tracking' : 'Active time'}>{fmtMins(a.activeTimeSec)}</td>
                     <td className="summary-cell muted">{a.tutorSummary ?? ''}</td>
                   </tr>
                 ))}

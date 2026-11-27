@@ -23,7 +23,11 @@ const fmtDuration = (sec: number) => {
   return `${h ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`;
 };
 
-function Timer({ attempt }: { attempt: Attempt | null }) {
+/**
+ * Active time: what the server counted up to the last activity, plus the time since then while it is shorter than
+ * the idle gap. After a longer pause the timer stops and says so; it picks up again on the next activity.
+ */
+function Timer({ attempt, idleGapMin }: { attempt: Attempt | null; idleGapMin: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (attempt?.status !== 'in_progress') return;
@@ -33,16 +37,48 @@ function Timer({ attempt }: { attempt: Attempt | null }) {
 
   if (!attempt) return <span className="pill muted" title="Start the problem with /next in Claude Code">not started</span>;
   if (attempt.status === 'in_progress') {
-    const sec = Math.max(0, Math.floor((now - new Date(attempt.startedAt).getTime()) / 1000));
-    return <span className="pill timer" title="Time since the attempt started">⏱ {fmtDuration(sec)}</span>;
+    const last = new Date(attempt.lastActivityAt ?? attempt.startedAt).getTime();
+    const since = Math.max(0, Math.floor((now - last) / 1000));
+    const paused = since > idleGapMin * 60;
+    const sec = (attempt.activeTimeSec ?? 0) + (paused ? 0 : since);
+    return (
+      <span
+        className={`pill ${paused ? 'muted' : 'timer'}`}
+        title={`Active time: breaks longer than ${idleGapMin} min don't count. Editing, running tests and talking to the tutor keep it going.`}
+      >
+        ⏱ {fmtDuration(sec)}
+        {paused && ' · paused'}
+      </span>
+    );
   }
   const label = attempt.status === 'completed' ? 'submitted' : 'abandoned';
   return (
-    <span className="pill muted">
+    <span className="pill muted" title={attempt.activeTimeSec == null ? 'Recorded before active-time tracking' : 'Active time'}>
       {label}
-      {attempt.solveTimeSec != null && ` · ${fmtDuration(attempt.solveTimeSec)}`}
+      {attempt.activeTimeSec != null && ` · ${fmtDuration(attempt.activeTimeSec)}`}
     </span>
   );
+}
+
+/** While the page is visible and the user has interacted recently, tell the server they're working on the problem. */
+function useActivityHeartbeat(slug: string, active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    let lastInput = Date.now();
+    const onInput = () => (lastInput = Date.now());
+    const events = ['keydown', 'pointerdown', 'pointermove', 'wheel'] as const;
+    for (const e of events) window.addEventListener(e, onInput, { passive: true });
+    const beat = () => {
+      if (document.visibilityState === 'visible' && document.hasFocus() && Date.now() - lastInput < 2 * 60_000) {
+        void api.activity(slug).catch(() => {});
+      }
+    };
+    const t = setInterval(beat, 60_000);
+    return () => {
+      clearInterval(t);
+      for (const e of events) window.removeEventListener(e, onInput);
+    };
+  }, [slug, active]);
 }
 
 function HintPill({ attempt, meta }: { attempt: Attempt | null; meta: Meta | null }) {
@@ -253,6 +289,8 @@ export default function ProblemPage() {
     };
   }, [data?.generated, slug, applyDiskCode]);
 
+  useActivityHeartbeat(slug, attempt?.status === 'in_progress');
+
   // Flush pending edits / warn when leaving with unsaved changes.
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => {
@@ -285,7 +323,7 @@ export default function ProblemPage() {
         {attempt?.isReview && attempt.status === 'in_progress' && <span className="pill review">review</span>}
         <span className="spacer" />
         <HintPill attempt={attempt} meta={meta} />
-        <Timer attempt={attempt} />
+        <Timer attempt={attempt} idleGapMin={meta?.idleGapMin ?? 20} />
       </NavBar>
 
       {!data.generated ? (

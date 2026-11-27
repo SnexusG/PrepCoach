@@ -68,6 +68,13 @@
   "weaknesses": {
     "cleanDemonstrationsToResolve": 3
   },
+  "forecast": {
+    "windowDays": 28,
+    "minSpanDays": 7,
+    "minSolves": 3,
+    "difficultyEffort": { "easy": 0.6, "medium": 1, "hard": 1.8 },
+    "idleGapMin": 20
+  },
   "runner": {
     "perTestTimeoutMs": 2000
   },

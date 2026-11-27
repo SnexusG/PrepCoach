@@ -113,7 +113,7 @@ describe('recordAttempt', () => {
 describe('abandonAttempt', () => {
   it('records the attempt as abandoned with no rating change or review, and the problem stays unsolved', () => {
     startAttempt(db, 'number-of-islands', { now: t0 });
-    const a = abandonAttempt(db, 'number-of-islands', { summary: 'stuck on approach', now: t1 });
+    const a = abandonAttempt(db, cfg, 'number-of-islands', { summary: 'stuck on approach', now: t1 });
     expect(a).toMatchObject({ status: 'abandoned', solveTimeSec: 1500, tutorSummary: 'stuck on approach' });
     expect(rating('Graphs')).toMatchObject({ rating: 1200, attempts: 0 });
     expect(db.prepare('SELECT COUNT(*) AS n FROM rating_history').get()).toEqual({ n: 0 });

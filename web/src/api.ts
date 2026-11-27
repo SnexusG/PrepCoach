@@ -18,6 +18,9 @@ export interface Attempt {
   startedAt: string;
   finishedAt: string | null;
   solveTimeSec: number | null;
+  /** Working time (breaks excluded); null for attempts from before tracking. Open attempts: up to lastActivityAt. */
+  activeTimeSec: number | null;
+  lastActivityAt?: string;
   hintsUsed: number;
   outcomeScore: number | null;
 }
@@ -66,6 +69,8 @@ export interface Meta {
   hintNames: string[];
   hintCaps: number[];
   perTestTimeoutMs: number;
+  /** Gaps longer than this are breaks (the live timer pauses). */
+  idleGapMin: number;
 }
 
 export interface ProblemListItem {
@@ -104,6 +109,7 @@ export const api = {
   save: (slug: string, code: string, baseMtime: number | null, force = false) =>
     call<{ mtime: number }>(`${p(slug)}/solution`, { method: 'PUT', body: JSON.stringify({ code, baseMtime, force }) }),
   run: (slug: string) => call<ProblemState & { result: RunResult }>(`${p(slug)}/run`, { method: 'POST' }),
+  activity: (slug: string) => call<{ recorded: boolean }>(`${p(slug)}/activity`, { method: 'POST', body: '{}' }),
 };
 
 // ---------------- dashboard & history ----------------
@@ -130,6 +136,8 @@ export interface AttemptSummary {
   startedAt: string;
   finishedAt: string | null;
   solveTimeSec: number | null;
+  activeTimeSec: number | null;
+  lastActivityAt?: string;
   hintsUsed: number;
   testsPassed: number | null;
   testsTotal: number | null;
@@ -161,6 +169,24 @@ export interface ReviewItem {
   due: boolean;
 }
 
+export interface Forecast {
+  status: 'complete' | 'insufficient' | 'stalled' | 'ok';
+  solved: number;
+  total: number;
+  remaining: number;
+  remainingByDifficulty: Record<Difficulty, number>;
+  spanDays: number;
+  solvesInWindow: number;
+  perWeek: number;
+  date: string | null;
+  early: string | null;
+  late: string | null;
+  daysSinceLastSolve: number | null;
+  atOnePerDay: string | null;
+  target: { date: string; daysLeft: number; passed: boolean; requiredPerWeek: number | null; onTrack: boolean | null } | null;
+  history: { date: string; solved: number }[];
+}
+
 export interface Dashboard {
   stats: {
     prefs: { sheet: string; sheetName: string; difficulty: Difficulty };
@@ -171,6 +197,8 @@ export interface Dashboard {
     reviews: { due: number; upcoming7d: number };
     attempts: { completed: number; abandoned: number; inProgress: number };
     ratingHistory: { recordedAt: string; topic: string | null; rating: number }[];
+    forecast: Forecast;
+    activeTime: Record<Difficulty, { avgMinutes: number | null; attempts: number }>;
   };
   initialRating: number;
   labels: { min: number; label: string }[];
@@ -194,6 +222,8 @@ export const dashApi = {
   dashboard: () => call<Dashboard>('/api/dashboard'),
   attempts: () => call<AttemptSummary[]>('/api/attempts'),
   attempt: (id: number) => call<AttemptDetail>(`/api/attempts/${id}`),
+  setTargetDate: (date: string | null) =>
+    call<{ date: string | null }>('/api/preferences/target-date', { method: 'PUT', body: JSON.stringify({ date }) }),
 };
 
 // ---------------- formatting ----------------
@@ -203,4 +233,25 @@ export const fmtDate = (iso: string | null) =>
 export const fmtDateTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
 export const fmtMins = (sec: number | null) => (sec == null ? '—' : sec < 60 ? `${sec}s` : `${Math.round(sec / 60)} min`);
+
+/** A YYYY-MM-DD calendar day, e.g. "Mar 14, 2027". */
+export const fmtDay = (day: string | null) => {
+  if (!day) return '—';
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+/** The headline sentence for the completion forecast (home page and dashboard). */
+export function forecastHeadline(f: Forecast, sheetName: string): string {
+  switch (f.status) {
+    case 'complete':
+      return `${sheetName} complete — all ${f.total} solved.`;
+    case 'insufficient':
+      return `Solve a few more problems to see when you'll finish ${sheetName}.`;
+    case 'stalled':
+      return `No new problems solved in ${f.daysSinceLastSolve} days, so there's no current pace for ${sheetName}.`;
+    default:
+      return `On pace to finish ${sheetName} around ${fmtDay(f.date)}.`;
+  }
+}
 export const fmtDelta = (d: number | null) => (d == null ? '—' : `${d >= 0 ? '+' : '−'}${Math.abs(Math.round(d * 10) / 10)}`);

@@ -33,6 +33,9 @@ import {
   recordHint,
   runProblemTests,
   formatRunResult,
+  forecastLine,
+  getPreference,
+  parseTargetDate,
   renderContextMarkdown,
   seed,
   setPreference,
@@ -310,7 +313,8 @@ program
       const L = [
         `Recorded attempt #${r.attemptId} on ${slug}${r.isReview ? ' (review)' : ''}: outcome ${r.outcome.score.toFixed(2)}` +
           (r.outcome.raw > r.outcome.cap ? ` (capped from ${r.outcome.raw.toFixed(2)} by ${r.hintsUsed} hint level)` : '') +
-          ` · tests ${r.testsPassed}/${r.testsTotal} · ${mmss(r.solveTimeSec)}`,
+          ` · tests ${r.testsPassed}/${r.testsTotal} · ${mmss(r.activeTimeSec)} active` +
+          (r.solveTimeSec - r.activeTimeSec > 600 ? ` (${mmss(r.solveTimeSec)} since start)` : ''),
       ];
       if (p) L.push(`${p.topic}: ${Math.round(p.before)} → ${Math.round(p.after)} (${sign(p.delta)})`);
       for (const c of r.changes.filter((c) => !c.isPrimary)) {
@@ -331,8 +335,8 @@ program
   .description('abandon the open attempt: no rating change, problem stays unsolved and comes back later')
   .option('--summary <text>', 'why / where you got stuck')
   .action((slug, o) => {
-    const a = abandonAttempt(db(), slug, { summary: o.summary });
-    out(a, () => `Abandoned attempt #${a.id} on ${slug} after ${mmss(a.solveTimeSec)}. No rating change; it stays unsolved and will be offered again in a later session.`);
+    const a = abandonAttempt(db(), cfg, slug, { summary: o.summary });
+    out(a, () => `Abandoned attempt #${a.id} on ${slug} after ${mmss(a.activeTimeSec)} active. No rating change; it stays unsolved and will be offered again in a later session.`);
   });
 
 // ---------------- weakness ----------------
@@ -399,6 +403,7 @@ program
   .description('set preferences')
   .option('--sheet <id>', `active sheet (${listSheetFiles().join(', ')})`)
   .option('--difficulty <level>', 'preferred difficulty', parseDifficulty)
+  .option('--target-date <YYYY-MM-DD>', 'goal date for finishing the sheet ("none" clears it)')
   .action((o) => {
     const d = db();
     if (o.sheet) {
@@ -407,8 +412,10 @@ program
       setPreference(d, 'active_sheet', o.sheet);
     }
     if (o.difficulty) setPreference(d, 'difficulty', o.difficulty);
+    if (o.targetDate !== undefined) setPreference(d, 'target_date', parseTargetDate(o.targetDate) ?? '');
     const p = getPrefs(d);
-    out(p, () => `Sheet: ${p.sheetName} (${p.sheet}) · difficulty: ${p.difficulty}`);
+    const targetDate = getPreference(d, 'target_date') || null;
+    out({ ...p, targetDate }, () => `Sheet: ${p.sheetName} (${p.sheet}) · difficulty: ${p.difficulty} · target date: ${targetDate ?? 'none'}`);
   });
 
 // ---------------- tag ----------------
@@ -460,6 +467,9 @@ program
         `DSA rating ${Math.round(s.overall.rating)} — ${s.overall.label} (7d ${sign(s.overall.trend7d)}, 30d ${sign(s.overall.trend30d)})`,
         `${s.prefs.sheetName}: ${s.completion.solved}/${s.completion.total} solved (${pc(s.completion.solved, s.completion.total)}%) — ` +
           DIFFICULTIES.map((d) => `${d} ${s.completion.byDifficulty[d].solved}/${s.completion.byDifficulty[d].total}`).join(', '),
+        `Forecast: ${forecastLine(s.forecast)}`,
+        `Average active time: ` +
+          DIFFICULTIES.map((d) => `${d} ${s.activeTime[d].avgMinutes == null ? '-' : `${s.activeTime[d].avgMinutes} min`}`).join(', '),
         `Attempts: ${s.attempts.completed} completed, ${s.attempts.abandoned} abandoned, ${s.attempts.inProgress} open · ` +
           `Weaknesses: ${s.weaknesses.active} active, ${s.weaknesses.improving} improving, ${s.weaknesses.resolved} resolved · ` +
           `Reviews: ${s.reviews.due} due, ${s.reviews.upcoming7d} in next 7d`,

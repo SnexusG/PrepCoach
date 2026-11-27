@@ -52,7 +52,7 @@ describe('next + sessions', () => {
   it('excludes problems abandoned this session, re-serves them in the next one', () => {
     startSession(db, 'dsa', now);
     startAttempt(db, 'group-anagrams', { now });
-    abandonAttempt(db, 'group-anagrams', { now });
+    abandonAttempt(db, cfg, 'group-anagrams', { now });
     expect(nextProblem(db, cfg, { now }).selection!.slug).not.toBe('group-anagrams');
     endSession(db, { now });
     startSession(db, 'dsa', now);
@@ -70,7 +70,7 @@ describe('next + sessions', () => {
     const first = nextProblem(db, cfg, { now }).selection!;
     expect(first).toMatchObject({ slug: 'two-sum', isReview: true });
     startAttempt(db, 'two-sum', { isReview: true, now });
-    abandonAttempt(db, 'two-sum', { now });
+    abandonAttempt(db, cfg, 'two-sum', { now });
     expect(nextProblem(db, cfg, { now }).selection!.isReview).toBe(false);
   });
 });
@@ -82,7 +82,7 @@ describe('context', () => {
     recordTestRun(db, 'two-sum', 10, 10, now);
     recordAttempt(db, cfg, { slug: 'two-sum', rubric: perfect, weaknesses: [{ description: 'no complexity stated' }], now });
     startAttempt(db, 'valid-anagram', { now });
-    abandonAttempt(db, 'valid-anagram', { now });
+    abandonAttempt(db, cfg, 'valid-anagram', { now });
     const md = renderContextMarkdown(getContext(db, cfg, now));
     expect(md).toContain('no complexity stated');
     expect(md).toContain('Abandoned, still unsolved: valid-anagram');

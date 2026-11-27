@@ -10,7 +10,12 @@ import {
   listReviews,
   weaknessesWithExamples,
   getOpenAttempt,
+  getPreference,
   getProblem,
+  liveActiveTime,
+  parseTargetDate,
+  recordActivity,
+  setPreference,
   loadConfig,
   openDb,
   paths,
@@ -48,24 +53,31 @@ function httpError(status: number, message: string) {
 const mtimeOf = (file: string) => (fs.existsSync(file) ? fs.statSync(file).mtimeMs : null);
 const readIf = (file: string) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
 
-function lastAttempt(slug: string): AttemptRow | null {
+function lastAttempt(slug: string): (AttemptRow & { lastActivityAt?: string }) | null {
   const open = getOpenAttempt(db, slug);
-  if (open) return open;
+  if (open) return { ...open, ...liveActiveTime(db, cfg, open.id, open.startedAt) };
   const r = db
     .prepare(
       `SELECT id, status, is_review AS isReview, started_at AS startedAt, finished_at AS finishedAt,
-              solve_time_sec AS solveTimeSec, hints_used AS hintsUsed, outcome_score AS outcomeScore
+              solve_time_sec AS solveTimeSec, active_time_sec AS activeTimeSec, hints_used AS hintsUsed,
+              outcome_score AS outcomeScore
        FROM attempts WHERE problem_slug = ? ORDER BY id DESC LIMIT 1`,
     )
     .get(slug) as any;
   return r ? { ...r, isReview: !!r.isReview } : null;
 }
 
+/** Last Solution.java mtime seen per problem: a change made outside the web editor (an IDE) counts as activity. */
+const seenMtime = new Map<string, number | null>();
+
 /** Cheap, poll-friendly state: what the editor needs to pick up external edits, hint changes and CLI test runs. */
 function problemState(slug: string) {
   const files = problemFiles(slug);
+  const mtime = mtimeOf(files.solution);
+  if (seenMtime.has(slug) && mtime != null && mtime !== seenMtime.get(slug)) recordActivity(db, slug, 'edit', new Date(mtime));
+  seenMtime.set(slug, mtime);
   return {
-    solutionMtime: mtimeOf(files.solution),
+    solutionMtime: mtime,
     resultsMtime: mtimeOf(files.results),
     attempt: lastAttempt(slug),
     serverTime: new Date().toISOString(),
@@ -80,7 +92,12 @@ const wrap =
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/api/meta', (_req, res) => {
-  res.json({ hintNames: cfg.rating.hintNames, hintCaps: cfg.rating.hintCaps, perTestTimeoutMs: cfg.runner.perTestTimeoutMs });
+  res.json({
+    hintNames: cfg.rating.hintNames,
+    hintCaps: cfg.rating.hintCaps,
+    perTestTimeoutMs: cfg.runner.perTestTimeoutMs,
+    idleGapMin: cfg.forecast.idleGapMin,
+  });
 });
 
 /** Problems that have files on disk (for the temporary index page; the dashboard comes in phase 6). */
@@ -145,7 +162,16 @@ app.put('/api/problems/:slug/solution', (req, res) => {
     return res.status(409).json({ error: 'Solution.java changed on disk', code: readIf(files.solution), mtime: current });
   }
   fs.writeFileSync(files.solution, code);
-  res.json({ mtime: mtimeOf(files.solution) });
+  recordActivity(db, slug, 'edit');
+  const mtime = mtimeOf(files.solution);
+  seenMtime.set(slug, mtime);
+  res.json({ mtime });
+});
+
+/** Heartbeat from the problem page while it is visible and the user is interacting with it. */
+app.post('/api/problems/:slug/activity', (req, res) => {
+  problemFor(req.params.slug);
+  res.json({ recorded: recordActivity(db, req.params.slug, 'focus') });
 });
 
 const running = new Set<string>();
@@ -181,14 +207,28 @@ app.get('/api/dashboard', (_req, res) => {
     labels: cfg.rating.labels,
     weaknesses: weaknessesWithExamples(db, stats.track, ['active', 'improving']),
     reviews: listReviews(db, new Date(), { withinDays: 7 }),
-    recent: listAttempts(db, { track: stats.track, limit: 8 }),
+    recent: listAttempts(db, { track: stats.track, limit: 8, cfg }),
     session: activeSession(db) ?? null,
     tracks: tracks.map((t) => ({ ...t, enabled: !!t.enabled })),
   });
 });
 
 app.get('/api/attempts', (_req, res) => {
-  res.json(listAttempts(db, { track: 'dsa' }));
+  res.json(listAttempts(db, { track: 'dsa', cfg }));
+});
+
+/** Goal date for finishing the active sheet: { date: "YYYY-MM-DD" | null }. */
+app.put('/api/preferences/target-date', (req, res) => {
+  const raw = req.body?.date ?? null;
+  if (raw !== null && typeof raw !== 'string') throw httpError(400, '"date" must be a YYYY-MM-DD string or null');
+  let date: string | null;
+  try {
+    date = parseTargetDate(raw);
+  } catch (e) {
+    throw httpError(400, (e as Error).message);
+  }
+  setPreference(db, 'target_date', date ?? '');
+  res.json({ date: getPreference(db, 'target_date') || null });
 });
 
 app.get('/api/attempts/:id', (req, res) => {
@@ -196,7 +236,7 @@ app.get('/api/attempts/:id', (req, res) => {
   if (!Number.isInteger(id) || id <= 0) throw httpError(400, 'Invalid attempt id');
   let detail;
   try {
-    detail = attemptDetail(db, id);
+    detail = attemptDetail(db, id, cfg);
   } catch {
     throw httpError(404, `Attempt #${id} not found`);
   }
@@ -226,6 +266,7 @@ app.post('/api/tutor/message', (req, res) => {
   if (typeof text !== 'string' || !text.trim()) throw httpError(400, 'Body must include "text"');
   if (text.length > 8000) throw httpError(400, 'Message too long');
   tutor.send(text, typeof clientId === 'string' ? clientId : undefined);
+  recordActivity(db, null, 'tutor'); // talking the problem through with the tutor is work on the open attempt
   res.json({ ok: true });
 });
 

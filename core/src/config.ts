@@ -51,10 +51,24 @@ export interface PrepConfig {
     consecutiveFailsToDrop: number;
   };
   weaknesses: { cleanDemonstrationsToResolve: number };
+  forecast: ForecastConfig;
   runner: { perTestTimeoutMs: number };
   ports: { web: number; api: number };
   /** Voice tutor: the web server drives a headless Claude Code session (`claude -p`). Optional; defaults below. */
   tutor?: Partial<TutorConfig>;
+}
+
+export interface ForecastConfig {
+  /** Pace is measured over the last N days of solving. */
+  windowDays: number;
+  /** A short history is still treated as at least this many days, so one good day doesn't predict a sprint. */
+  minSpanDays: number;
+  /** Fewer solves than this in the window → no forecast yet. */
+  minSolves: number;
+  /** Relative effort per difficulty (medium = 1): pace and remaining work are measured in these units. */
+  difficultyEffort: Record<Difficulty, number>;
+  /** Gaps between activity events longer than this count as a break, not as solving time. */
+  idleGapMin: number;
 }
 
 export interface TutorConfig {
@@ -116,6 +130,17 @@ export function validateConfig(cfg: PrepConfig): void {
   }
   if (cfg.spacedRepetition.lowThreshold > cfg.spacedRepetition.highThreshold) {
     errors.push('spacedRepetition.lowThreshold must be <= highThreshold');
+  }
+  const f = cfg.forecast;
+  if (!f) errors.push('forecast section is missing');
+  else {
+    if (!(f.windowDays >= 7)) errors.push('forecast.windowDays must be >= 7');
+    if (!(f.minSpanDays >= 1 && f.minSpanDays <= f.windowDays)) errors.push('forecast.minSpanDays must be between 1 and windowDays');
+    if (!(Number.isInteger(f.minSolves) && f.minSolves >= 1)) errors.push('forecast.minSolves must be an integer >= 1');
+    for (const d of DIFFICULTIES) {
+      if (!(f.difficultyEffort?.[d] > 0)) errors.push(`forecast.difficultyEffort.${d} must be > 0`);
+    }
+    if (!(f.idleGapMin > 0)) errors.push('forecast.idleGapMin must be > 0');
   }
   const t = cfg.tutor ?? {};
   if (t.permissionMode && !['auto', 'dontAsk', 'acceptEdits'].includes(t.permissionMode)) {

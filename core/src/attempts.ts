@@ -1,4 +1,5 @@
 import type { Difficulty, PrepConfig, Track } from './config';
+import { attemptActiveSeconds, logActivity } from './activity';
 import { getPreference, type DB } from './db';
 import {
   computeOutcome,
@@ -34,6 +35,8 @@ export interface AttemptRow {
   startedAt: string;
   finishedAt: string | null;
   solveTimeSec: number | null;
+  /** Time actually spent working (see activity.ts); null for attempts recorded before tracking existed. */
+  activeTimeSec: number | null;
   hintsUsed: number;
   testsPassed: number | null;
   testsTotal: number | null;
@@ -55,8 +58,8 @@ export function getProblem(db: DB, slug: string): ProblemRow {
 }
 
 const ATTEMPT_COLS = `id, session_id AS sessionId, problem_slug AS problemSlug, status, is_review AS isReview,
-  started_at AS startedAt, finished_at AS finishedAt, solve_time_sec AS solveTimeSec, hints_used AS hintsUsed,
-  tests_passed AS testsPassed, tests_total AS testsTotal, last_run_at AS lastRunAt,
+  started_at AS startedAt, finished_at AS finishedAt, solve_time_sec AS solveTimeSec, active_time_sec AS activeTimeSec,
+  hints_used AS hintsUsed, tests_passed AS testsPassed, tests_total AS testsTotal, last_run_at AS lastRunAt,
   outcome_score AS outcomeScore, tutor_summary AS tutorSummary`;
 
 function mapAttempt(r: any): AttemptRow {
@@ -106,6 +109,7 @@ export function startAttempt(
         .run(sessionId, slug, isReview ? 1 : 0, now.toISOString()).lastInsertRowid,
     );
     if (isReview && sessionId) db.prepare('UPDATE sessions SET reviews_served = reviews_served + 1 WHERE id = ?').run(sessionId);
+    logActivity(db, id, 'start', now);
     return id;
   })();
   return { attempt: getAttempt(db, id), resumed: false };
@@ -119,6 +123,7 @@ export function recordHint(db: DB, cfg: PrepConfig, slug: string, level: number,
   db.transaction(() => {
     db.prepare('INSERT INTO hint_log (attempt_id, level, given_at) VALUES (?, ?, ?)').run(a.id, lvl, now.toISOString());
     db.prepare('UPDATE attempts SET hints_used = ? WHERE id = ?').run(lvl, a.id);
+    logActivity(db, a.id, 'hint', now);
   })();
   return lvl;
 }
@@ -133,19 +138,30 @@ export function recordTestRun(db: DB, slug: string, passed: number, total: numbe
     now.toISOString(),
     a.id,
   );
+  logActivity(db, a.id, 'run', now);
 }
 
 function elapsedSec(startedAt: string, now: Date): number {
   return Math.max(0, Math.round((now.getTime() - new Date(startedAt).getTime()) / 1000));
 }
 
+/** Logs the finishing event and returns the attempt's active time up to `now`. */
+function finishActiveTime(db: DB, cfg: PrepConfig, a: AttemptRow, now: Date): number {
+  logActivity(db, a.id, 'finish', now);
+  return attemptActiveSeconds(db, cfg, a.id, a.startedAt, now.toISOString());
+}
+
 /** Abandon: marked unsolved, no rating change, no review scheduled. */
-export function abandonAttempt(db: DB, slug: string, opts: { summary?: string; now?: Date } = {}): AttemptRow {
+export function abandonAttempt(db: DB, cfg: PrepConfig, slug: string, opts: { summary?: string; now?: Date } = {}): AttemptRow {
   const a = requireOpenAttempt(db, slug);
   const now = opts.now ?? new Date();
-  db.prepare(
-    `UPDATE attempts SET status = 'abandoned', finished_at = ?, solve_time_sec = ?, tutor_summary = ? WHERE id = ?`,
-  ).run(now.toISOString(), elapsedSec(a.startedAt, now), opts.summary ?? null, a.id);
+  db.transaction(() => {
+    const active = finishActiveTime(db, cfg, a, now);
+    db.prepare(
+      `UPDATE attempts SET status = 'abandoned', finished_at = ?, solve_time_sec = ?, active_time_sec = ?, tutor_summary = ?
+       WHERE id = ?`,
+    ).run(now.toISOString(), elapsedSec(a.startedAt, now), active, opts.summary ?? null, a.id);
+  })();
   return getAttempt(db, a.id);
 }
 
@@ -204,6 +220,7 @@ export interface RecordAttemptResult {
   testsPassed: number;
   testsTotal: number;
   solveTimeSec: number;
+  activeTimeSec: number;
   changes: RatingChange[];
   overallBefore: number;
   overallAfter: number;
@@ -226,6 +243,7 @@ export function recordAttempt(db: DB, cfg: PrepConfig, params: RecordAttemptPara
   const solveTimeSec = elapsedSec(attempt.startedAt, now);
 
   return db.transaction((): RecordAttemptResult => {
+    const activeTimeSec = finishActiveTime(db, cfg, attempt, now);
     const overallBefore = computeOverallRating(db, cfg, track);
 
     // Elo updates: primary topic at full weight, secondary topics at reduced weight.
@@ -280,11 +298,12 @@ export function recordAttempt(db: DB, cfg: PrepConfig, params: RecordAttemptPara
     insHistory.run(track, null, overallAfter, ts, attempt.id);
 
     db.prepare(
-      `UPDATE attempts SET status = 'completed', finished_at = ?, solve_time_sec = ?, hints_used = ?,
+      `UPDATE attempts SET status = 'completed', finished_at = ?, solve_time_sec = ?, active_time_sec = ?, hints_used = ?,
          tests_passed = ?, tests_total = ?, rubric = ?, outcome_score = ?, tutor_summary = ? WHERE id = ?`,
     ).run(
       ts,
       solveTimeSec,
+      activeTimeSec,
       hintsUsed,
       testsPassed,
       testsTotal,
@@ -320,6 +339,7 @@ export function recordAttempt(db: DB, cfg: PrepConfig, params: RecordAttemptPara
       testsPassed,
       testsTotal,
       solveTimeSec,
+      activeTimeSec,
       changes,
       overallBefore,
       overallAfter,

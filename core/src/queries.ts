@@ -8,6 +8,8 @@ import { activeSession, type SessionRow } from './sessions';
 import { toDateString, addDays } from './spacedRepetition';
 import { listWeaknesses, type WeaknessRow } from './weaknesses';
 import { problemFiles, sheetName } from './catalog';
+import { liveActiveTime } from './activity';
+import { activeTimeByDifficulty, getForecast, type ActiveTimeStat, type Forecast } from './forecast';
 
 export interface Prefs {
   sheet: string;
@@ -62,6 +64,10 @@ export interface AttemptSummary {
   startedAt: string;
   finishedAt: string | null;
   solveTimeSec: number | null;
+  /** Active (working) time; for an open attempt, up to `lastActivityAt`. null = recorded before tracking existed. */
+  activeTimeSec: number | null;
+  /** Open attempts only: the latest activity (the live timer runs on from here). */
+  lastActivityAt?: string;
   hintsUsed: number;
   testsPassed: number | null;
   testsTotal: number | null;
@@ -71,9 +77,19 @@ export interface AttemptSummary {
   sessionId: number | null;
 }
 
+/** Fills in the live active time of open attempts (finished ones have it stored). */
+function withLiveTime<T extends { id: number; status: string; startedAt: string; activeTimeSec: number | null }>(
+  db: DB,
+  cfg: PrepConfig | undefined,
+  row: T,
+): T & { lastActivityAt?: string } {
+  if (row.status !== 'in_progress' || !cfg) return row;
+  return { ...row, ...liveActiveTime(db, cfg, row.id, row.startedAt) };
+}
+
 export function listAttempts(
   db: DB,
-  opts: { track?: Track; limit?: number; status?: string; topic?: string; slug?: string; sessionId?: number } = {},
+  opts: { track?: Track; limit?: number; status?: string; topic?: string; slug?: string; sessionId?: number; cfg?: PrepConfig } = {},
 ): AttemptSummary[] {
   const where: string[] = ['p.track = ?'];
   const args: unknown[] = [opts.track ?? 'dsa'];
@@ -85,6 +101,7 @@ export function listAttempts(
     .prepare(
       `SELECT a.id, a.problem_slug AS slug, p.title, t.name AS topic, p.difficulty, a.status, a.is_review AS isReview,
               a.started_at AS startedAt, a.finished_at AS finishedAt, a.solve_time_sec AS solveTimeSec,
+              a.active_time_sec AS activeTimeSec,
               a.hints_used AS hintsUsed, a.tests_passed AS testsPassed, a.tests_total AS testsTotal,
               a.outcome_score AS outcomeScore, a.tutor_summary AS tutorSummary, a.session_id AS sessionId,
               (SELECT c.rating_after - c.rating_before FROM attempt_rating_changes c
@@ -94,7 +111,7 @@ export function listAttempts(
        ORDER BY a.id DESC LIMIT ?`,
     )
     .all(...args, opts.limit ?? 1000) as any[];
-  return rows.map((r) => ({ ...r, isReview: !!r.isReview }));
+  return rows.map((r) => withLiveTime(db, opts.cfg, { ...r, isReview: !!r.isReview }));
 }
 
 // ---------- reviews ----------
@@ -236,6 +253,9 @@ export interface Stats {
   reviews: { due: number; upcoming7d: number };
   attempts: { completed: number; abandoned: number; inProgress: number };
   ratingHistory: { recordedAt: string; topic: string | null; rating: number }[];
+  forecast: Forecast;
+  /** Average active time per difficulty (attempts tracked since active-time tracking was added). */
+  activeTime: Record<Difficulty, ActiveTimeStat>;
 }
 
 function overallAt(db: DB, cfg: PrepConfig, track: Track, iso: string): number {
@@ -326,6 +346,8 @@ export function getStats(db: DB, cfg: PrepConfig, now = new Date()): Stats {
     reviews: { due: reviews.filter((r) => r.due).length, upcoming7d: reviews.filter((r) => !r.due).length },
     attempts: { completed: count('completed'), abandoned: count('abandoned'), inProgress: count('in_progress') },
     ratingHistory,
+    forecast: getForecast(db, cfg, { sheet: prefs.sheet, track, now }),
+    activeTime: activeTimeByDifficulty(db, track),
   };
 }
 
@@ -373,7 +395,7 @@ export function getContext(db: DB, cfg: PrepConfig, now = new Date()): ContextDa
     stats,
     weaknesses: weaknessesWithExamples(db, prefs.track, ['active', 'improving']),
     recent: listAttempts(db, { track: prefs.track, limit: 6 }).filter((a) => a.status !== 'in_progress').slice(0, 5),
-    open: listAttempts(db, { track: prefs.track, status: 'in_progress' }),
+    open: listAttempts(db, { track: prefs.track, status: 'in_progress', cfg }),
     abandoned: sheetProblems(db, prefs.sheet).filter((p) => p.status === 'abandoned') as ContextData['abandoned'],
     reviewsDue: reviews.filter((r) => r.due),
     reviewsUpcoming: reviews.filter((r) => !r.due),
@@ -384,6 +406,30 @@ export function getContext(db: DB, cfg: PrepConfig, now = new Date()): ContextDa
 const fmtDelta = (d: number) => `${d >= 0 ? '+' : ''}${Math.round(d * 10) / 10}`;
 const pct = (a: number, b: number) => (b ? Math.round((100 * a) / b) : 0);
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : '?');
+const mins = (sec: number | null) => (sec == null ? 'unknown time' : `${Math.round(sec / 60)} min`);
+
+/** One-line forecast, shared by `prep context` and `prep stats`. */
+export function forecastLine(f: Forecast): string {
+  const target = f.target
+    ? f.target.passed
+      ? ` · target ${f.target.date} has passed`
+      : ` · target ${f.target.date}: needs ${f.target.requiredPerWeek ?? 0}/week` +
+        (f.target.onTrack == null ? '' : f.target.onTrack ? ' (on track)' : ' (behind)')
+    : '';
+  switch (f.status) {
+    case 'complete':
+      return `sheet complete (${f.total}/${f.total})${target}`;
+    case 'insufficient':
+      return `not enough data yet (${f.solved} solved; needs a few more for a pace)${target}`;
+    case 'stalled':
+      return `no new problems solved in ${f.daysSinceLastSolve} days, so no current pace · ${f.remaining} left${target}`;
+    default:
+      return (
+        `finish ${f.remaining} remaining around ${f.date} (range ${f.early} – ${f.late ?? 'open-ended'}) at ` +
+        `${f.perWeek} problems/week over ${Math.round(f.spanDays)} days · at 1/day: ${f.atOnePerDay}${target}`
+      );
+  }
+}
 
 export function renderContextMarkdown(c: ContextData): string {
   const s = c.stats;
@@ -401,6 +447,11 @@ export function renderContextMarkdown(c: ContextData): string {
       DIFFICULTIES.map((d) => `${d} ${s.completion.byDifficulty[d].solved}/${s.completion.byDifficulty[d].total}`).join(', ') +
       ` · Attempts: ${s.attempts.completed} completed, ${s.attempts.abandoned} abandoned`,
   );
+  L.push(`Forecast: ${forecastLine(s.forecast)}`);
+  const times = DIFFICULTIES.filter((d) => s.activeTime[d].avgMinutes != null).map(
+    (d) => `${d} ${s.activeTime[d].avgMinutes} min (${s.activeTime[d].attempts})`,
+  );
+  if (times.length) L.push(`Average active time per solve: ${times.join(', ')}`);
   L.push('');
 
   const attempted = s.topics.filter((t) => t.attempts > 0).sort((a, b) => a.rating - b.rating);
@@ -440,7 +491,12 @@ export function renderContextMarkdown(c: ContextData): string {
 
   if (c.open.length || c.abandoned.length) {
     L.push('## Unfinished');
-    for (const a of c.open) L.push(`- In progress: ${a.slug} (${a.topic}, ${a.difficulty}) since ${a.startedAt.slice(0, 16).replace('T', ' ')} UTC, hints ${a.hintsUsed}`);
+    for (const a of c.open) {
+      L.push(
+        `- In progress: ${a.slug} (${a.topic}, ${a.difficulty}) since ${a.startedAt.slice(0, 16).replace('T', ' ')} UTC, ` +
+          `${mins(a.activeTimeSec)} active so far, hints ${a.hintsUsed}`,
+      );
+    }
     for (const p of c.abandoned) L.push(`- Abandoned, still unsolved: ${p.slug} (${p.topic}, ${p.difficulty}) on ${day(p.lastAbandonedAt)}`);
     L.push('');
   }
@@ -452,7 +508,8 @@ export function renderContextMarkdown(c: ContextData): string {
       `${day(a.finishedAt ?? a.startedAt)} ${a.slug} (${a.topic}, ${a.difficulty}${a.isReview ? ', review' : ''})`,
       a.status === 'abandoned'
         ? 'ABANDONED'
-        : `outcome ${a.outcomeScore?.toFixed(2)}, tests ${a.testsPassed ?? 0}/${a.testsTotal ?? 0}, hints ${a.hintsUsed}, Δ ${fmtDelta(a.ratingDelta ?? 0)}`,
+        : `outcome ${a.outcomeScore?.toFixed(2)}, tests ${a.testsPassed ?? 0}/${a.testsTotal ?? 0}, hints ${a.hintsUsed}, Δ ${fmtDelta(a.ratingDelta ?? 0)}` +
+          (a.activeTimeSec != null ? `, ${mins(a.activeTimeSec)} active` : ''),
     ];
     L.push(`- ${parts.join(' — ')}${a.tutorSummary ? ` — ${a.tutorSummary}` : ''}`);
   }
@@ -485,11 +542,12 @@ export interface AttemptDetail extends AttemptSummary {
   weaknesses: { id: number; description: string; topic: string | null; status: string; kind: 'observed' | 'handled_well' }[];
 }
 
-export function attemptDetail(db: DB, id: number): AttemptDetail {
+export function attemptDetail(db: DB, id: number, cfg?: PrepConfig): AttemptDetail {
   const summary = db
     .prepare(
       `SELECT a.id, a.problem_slug AS slug, p.title, t.name AS topic, p.difficulty, a.status, a.is_review AS isReview,
               a.started_at AS startedAt, a.finished_at AS finishedAt, a.solve_time_sec AS solveTimeSec,
+              a.active_time_sec AS activeTimeSec,
               a.hints_used AS hintsUsed, a.tests_passed AS testsPassed, a.tests_total AS testsTotal,
               a.outcome_score AS outcomeScore, a.tutor_summary AS tutorSummary, a.session_id AS sessionId, a.rubric,
               (SELECT c.rating_after - c.rating_before FROM attempt_rating_changes c
@@ -521,5 +579,5 @@ export function attemptDetail(db: DB, id: number): AttemptDetail {
   } catch {
     rubric = null;
   }
-  return { ...summary, isReview: !!summary.isReview, rubric, ratingChanges, hints, weaknesses };
+  return withLiveTime(db, cfg, { ...summary, isReview: !!summary.isReview, rubric, ratingChanges, hints, weaknesses });
 }

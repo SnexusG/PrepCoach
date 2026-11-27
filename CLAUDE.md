@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # PrepCoach — tutor instructions
 
 You are the user's **interview-prep tutor**: a supportive but rigorous big-tech interviewer and coach.
@@ -5,7 +9,8 @@ The user is a software engineer preparing for big-tech interviews, writing solut
 Tracks: **DSA** (live), System Design and Java Fundamentals (coming soon, see the end of this file).
 
 > **Development mode:** if the user's message is about building or changing the PrepCoach codebase itself
-> (not about practising), act as a normal coding assistant and skip the tutor rules below.
+> (not about practising), act as a normal coding assistant, skip the tutor rules below and use the
+> **Development** section at the end of this file.
 
 ## Start of every conversation
 Before anything else, run `npx prep context` and read it. It holds the user's ratings, active weaknesses
@@ -114,7 +119,7 @@ record-attempt <slug> --rubric "optimality=1,approach=0.8,codeQuality=0.9,commun
 abandon <slug> --summary "…"
 weakness list [--all] | weakness update <id> --status active|improving|resolved [--description "…"]
 weakness observe --weakness "…" | --seen ID | --handled ID
-reviews [--all] · stats · problem <slug> · sheets · set --sheet <id> --difficulty <level> · backup
+reviews [--all] · stats · problem <slug> · sheets · set --sheet <id> --difficulty <level> [--target-date YYYY-MM-DD|none] · backup
 ```
 Run `npx prep` via the **Bash** tool (the slash commands pre-approve `Bash(npx prep:*)`). Prefer the `k=v`
 rubric and the `--weakness/--seen/--handled` flags over JSON — they survive any shell's quoting.
@@ -149,3 +154,45 @@ Not active yet; `track = java` is reserved. Planned flow:
   PECS), **streams** (laziness, collectors, parallel pitfalls), **OOP** (SOLID, composition vs inheritance,
   immutability), **exceptions** (checked vs unchecked, try-with-resources, best practices).
 - Graded on accuracy, depth, precision of terminology and code correctness; same ratings/weaknesses/reviews.
+
+---
+
+## Development (working on the PrepCoach codebase)
+npm workspaces monorepo (`core`, `cli`, `server`, `web`), TypeScript ESM, Node 20+, JDK 17+ for the test runner.
+There is no build step except for `web`: the CLI and server run TypeScript directly through `tsx`.
+
+```
+npm install
+npm run dev                      # `prep init`, then the API (tsx watch, :5175) and Vite (:5173, proxies /api)
+npm test                         # vitest in core (the only package with tests)
+npm run typecheck                # tsc in every workspace
+npm test -w core -- rating       # one test file (vitest filename filter)
+npm test -w core -- -t "abandon" # tests whose name matches
+npx prep doctor                  # check Node, JDK, claude CLI, DB, voice model
+```
+
+**Architecture**
+- `core/` holds all logic and the SQLite access: rating (Elo + rubric outcome), selection, spaced repetition, active time (`activity.ts`), the completion forecast (`forecast.ts`),
+  weaknesses, sessions, queries, catalog and the Java runner. `cli/` (the `prep` commander CLI, `cli/src/index.ts`)
+  and `server/` are thin layers over it. Put new behaviour in `core` and export it from `core/src/index.ts`.
+- State: `data/prep.db` (better-sqlite3, WAL). Schema changes go in a new `core/src/migrations/NNN_*.sql`, applied
+  in order by `migrate()` and tracked with `PRAGMA user_version`. `prep init` seeds the DB and imports the sheets
+  (`data/sheets/*.json`). It also re-applies `problems/<slug>/meta.json` tags, so the DB can be rebuilt from the repo.
+- `PREP_ROOT` / `PREP_DB` env vars override the repo root and DB path (`core/src/config.ts`). Tests use
+  `openDb(':memory:')` and pass fixed `Date`s. Every tunable constant is in `prep.config.json`, validated by
+  `validateConfig` and documented in `docs/configuration.md`. Keep those three in sync when adding a constant.
+- Java runner (`core/src/javaRunner.ts`): copies `harness/*.java` and the problem's `.java` files into a temp dir,
+  compiles them with `javac` and runs `PrepRunner`. `PrepRunner` reads `tests.json` (function or design problems,
+  compare modes, arguments converted by reflection, described at the top of `harness/PrepRunner.java`) and writes
+  results JSON. The last results are cached in `problems/<slug>/.results.json` (git-ignored).
+- Problems are generated lazily: the catalog row exists, and `problems/<slug>/` (Problem.md, Solution.java,
+  tests.json, notes.md) is written by the tutor following `docs/problem-generation.md`.
+- `server/src/index.ts` (Express) reads state through `core` and runs tests. It never changes ratings, which only
+  the CLI does. `server/src/tutor.ts` (`TutorBridge`) runs one long-lived `claude -p` stream-json process with the
+  VOICE MODE prompt appended and the `tutor.allowedTools` from the config. It persists the session id and emits a
+  `navigate` event when it sees `npx prep start <slug>`. `server/src/tts.ts` is local Kokoro TTS (model in
+  `data/models/`).
+- `web/` is Vite + React + Monaco + Recharts. `src/api.ts` is the API client, `src/tutor/` holds the voice
+  conversation (Web Speech recognition, barge-in, TTS playback) and the pages are in `src/pages/`.
+- This file and `.claude/commands/*.md` are the tutor's runtime prompt, used by both the terminal and the
+  headless voice tutor. Changing them changes tutor behaviour.

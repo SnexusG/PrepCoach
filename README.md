@@ -107,6 +107,7 @@ prep run-tests <slug>       compile and test Solution.java
 prep reviews                spaced-repetition queue
 prep weakness list
 prep set --sheet neetcode150 --difficulty medium
+prep set --target-date 2027-03-31        # goal date for the completion forecast ("none" clears it)
 prep backup                 copy the DB to data/backups/prep-<timestamp>.db
 ```
 

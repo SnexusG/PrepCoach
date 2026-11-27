@@ -44,6 +44,18 @@ weighted average of topic ratings by `frequencyWeight × confidence`.
 ## `weaknesses`
 `cleanDemonstrationsToResolve` (3): clean, unprompted demonstrations needed to resolve a weakness.
 
+## `forecast` (completion date and active time)
+| Key | Default | Meaning |
+|---|---|---|
+| `windowDays` | 28 | pace = work solved in the last 28 days (problems solved for the first time on the active sheet) |
+| `minSpanDays` | 7 | a shorter history still counts as at least 7 days, so one busy day doesn't predict a sprint |
+| `minSolves` | 3 | fewer solves than this in the window → "solve a few more to see a forecast" |
+| `difficultyEffort` | easy 0.6 · medium 1 · hard 1.8 | relative work per problem; pace and the remaining sheet are measured in these units |
+| `idleGapMin` | 20 | active time counts the gaps between activity events (editing, test runs, hints, tutor messages, the problem page in focus) up to this long; longer gaps are breaks |
+
+The early–late range uses √n uncertainty on the number of solves in the window, so it narrows as you solve more.
+Set a goal with `prep set --target-date 2027-02-28` (or on the dashboard); `--target-date none` clears it.
+
 ## `runner`
 `perTestTimeoutMs` (2000): per-test-case timeout for Java solutions (catches infinite loops).
 
