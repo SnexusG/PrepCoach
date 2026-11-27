@@ -169,6 +169,10 @@ function Settings({ onClose }: { onClose: () => void }) {
         <input type="checkbox" checked={t.settings.chatInVoice} onChange={(e) => t.updateSettings({ chatInVoice: e.target.checked })} />
         Show the chat while talking
       </label>
+      <label title="Off: the mic stays on and listens hands-free. On: it turns off once your turn is sent — click the mic to talk again.">
+        <input type="checkbox" checked={t.settings.micOffAfterTurn} onChange={(e) => t.updateSettings({ micOffAfterTurn: e.target.checked })} />
+        Turn the mic off after each turn
+      </label>
       <label title="How long you must pause before your turn is sent">
         Pause to send {(t.settings.pauseMs / 1000).toFixed(1)} s
         <input type="range" min={1000} max={4000} step={100} value={t.settings.pauseMs} onChange={(e) => t.updateSettings({ pauseMs: +e.target.value })} />

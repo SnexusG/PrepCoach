@@ -31,6 +31,8 @@ export interface VoiceSettings {
   chatInVoice: boolean;
   /** Speech recognition: local Whisper (falls back to the browser when unavailable) or the browser's own. */
   sttEngine: SttEngine;
+  /** Turn the mic off once each spoken turn is sent (click the mic to talk again), instead of listening hands-free. */
+  micOffAfterTurn: boolean;
 }
 
 const DEFAULT_SETTINGS: VoiceSettings = {
@@ -42,6 +44,7 @@ const DEFAULT_SETTINGS: VoiceSettings = {
   rate: 1.05,
   pauseMs: 1800,
   chatInVoice: false,
+  micOffAfterTurn: false,
 };
 
 interface TutorApi {
@@ -150,6 +153,10 @@ export function TutorProvider({ children }: { children: ReactNode }) {
   // ---- listeners (hands-free): local Whisper, or the browser's Web Speech as the fallback ----
   const [sttStatus, setSttStatus] = useState<SttStatus | null>(null);
   const [sttInUse, setSttInUse] = useState<SttEngine | null>(null);
+  // The listeners are built once from these callbacks, so they read the setting and stopMic through refs.
+  const micOffAfterTurn = useRef(settings.micOffAfterTurn);
+  micOffAfterTurn.current = settings.micOffAfterTurn;
+  const stopMicRef = useRef<() => void>(() => {});
   const callbacks = useMemo(
     () => ({
       onInterim: (t: string) => {
@@ -160,6 +167,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
       onUtterance: (t: string) => {
         if (speaker.isEcho(t)) return; // the tutor's own voice through the speakers
         send(t);
+        if (micOffAfterTurn.current) stopMicRef.current();
       },
       onError: (m: string) => setMicError(m),
       onActiveChange: (a: boolean) => {
@@ -215,6 +223,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     listener.stop();
     whisper.stop();
   }, [listener, whisper]);
+  stopMicRef.current = stopMic;
 
   useEffect(() => {
     speaker.onSpeakingChange = setSpeaking;
