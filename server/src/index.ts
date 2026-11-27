@@ -100,8 +100,6 @@ const wrap =
   (req: Request, res: Response, next: NextFunction) =>
     Promise.resolve(fn(req, res)).catch(next);
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
-
 app.get('/api/meta', (_req, res) => {
   res.json({
     hintNames: cfg.rating.hintNames,
@@ -109,22 +107,6 @@ app.get('/api/meta', (_req, res) => {
     perTestTimeoutMs: cfg.runner.perTestTimeoutMs,
     idleGapMin: cfg.forecast.idleGapMin,
   });
-});
-
-/** Problems that have files on disk (for the temporary index page; the dashboard comes in phase 6). */
-app.get('/api/problems', (_req, res) => {
-  const slugs = fs.existsSync(paths.problems) ? fs.readdirSync(paths.problems) : [];
-  const list = slugs
-    .filter((s) => SLUG.test(s) && problemFiles(s).generated)
-    .flatMap((s) => {
-      try {
-        const p = getProblem(db, s);
-        return [{ slug: s, title: p.title, topic: p.topic, difficulty: p.difficulty, attempt: lastAttempt(s) }];
-      } catch {
-        return [];
-      }
-    });
-  res.json(list);
 });
 
 app.get('/api/problems/:slug', (req, res) => {
@@ -297,14 +279,6 @@ app.post('/api/tutor/reset', (_req, res) => {
   res.json({ ok: true });
 });
 
-/** The problem with an in-progress attempt, if any (the voice UI opens it). */
-app.get('/api/current', (_req, res) => {
-  const r = db
-    .prepare(`SELECT problem_slug AS slug FROM attempts WHERE status = 'in_progress' ORDER BY id DESC LIMIT 1`)
-    .get() as { slug: string } | undefined;
-  res.json({ slug: r?.slug ?? null });
-});
-
 // ---------------- neural text-to-speech (Kokoro, local) ----------------
 const tts = new Tts(path.join(paths.root, 'data', 'models'), tutorConfig(cfg).ttsDtype);
 // Warm the model in the background so the first reply isn't delayed (first run downloads it).
@@ -364,14 +338,6 @@ app.post(
     }
   }),
 );
-
-app.get('/api/drills/:id', (req, res) => {
-  try {
-    res.json(publicDrillSet(getDrillSet(db, Number(req.params.id))));
-  } catch {
-    throw httpError(404, 'Drill not found');
-  }
-});
 
 /** Answer one question: multiple choice / spot-the-bug / exact matches are graded here, other typed answers by Claude. */
 app.post(

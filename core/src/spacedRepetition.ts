@@ -97,7 +97,3 @@ export function scheduleReview(
     reviewsCount,
   };
 }
-
-export function isDue(state: Pick<ReviewState, 'dueDate'>, today: Date): boolean {
-  return state.dueDate <= toDateString(today);
-}

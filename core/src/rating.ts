@@ -166,6 +166,3 @@ export function ratingLabel(rating: number, cfg: PrepConfig): string {
   return label;
 }
 
-export function problemRatingFor(difficulty: keyof PrepConfig['rating']['difficultyRatings'], cfg: PrepConfig): number {
-  return cfg.rating.difficultyRatings[difficulty];
-}

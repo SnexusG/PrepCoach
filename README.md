@@ -2,11 +2,12 @@
 
 A local-only interview-prep coach for big-tech interviews. **Claude Code is the tutor**: it serves problems,
 runs the approach discussion like an interviewer, gives tiered hints and reviews your code. PrepCoach provides
-everything a chat is bad at: a Java editor with a test runner, a deterministic rating engine, weakness tracking,
-spaced-repetition reviews, a progress dashboard, and a **hands-free voice conversation** with the tutor.
+everything a chat is bad at: a Java editor with a test runner, a deterministic rating engine, weakness tracking
+with practice drills, spaced-repetition reviews, a progress dashboard with a completion forecast, and a
+**hands-free voice conversation** with the tutor.
 
-No LLM API key is needed: the tutor runs on your Claude subscription through the `claude` CLI, and nothing in
-PrepCoach calls an LLM API directly.
+No LLM API key is needed: the tutor (and the drill-question writer) run on your Claude subscription through the
+`claude` CLI, and nothing in PrepCoach calls an LLM API directly.
 
 - **Track:** DSA (NeetCode 150 / Blind 75) in Java 17. System Design and Java Fundamentals are reserved for later.
 - **State:** SQLite (`data/prep.db`). All ratings and state changes go through the `prep` CLI.
@@ -54,10 +55,10 @@ voice input falls back to Chrome/Edge's built-in recognition. See `stt` in `docs
 3. Talk through your approach and its complexity. The tutor probes edge cases and asks "can you do better?",
    without giving the answer away.
 4. Code in the editor (it autosaves to `problems/<slug>/Solution.java`). **Run tests** with Ctrl+Enter.
-   Between problems, the **Drill** page gives you 5 quick questions (multiple choice, typed answers,
-   spot-the-bug) aimed at one of your weaknesses, generated from your actual slips.
 5. Say *"I'm done"* or press **Submit** to get the interviewer review. Your rating, weaknesses and review queue
    update and the dashboard reflects them right away.
+6. Between problems, open **Drill** for **Mixed practice**: quick questions (multiple choice, typed answers,
+   spot-the-bug, fix-the-code) across your focus areas, written from your actual slips. Or practise one area.
 
 **How the voice works**
 - **Hands-free.** The mic stays open, and a short pause sends your turn. Pause length is set in ⚙.
@@ -65,9 +66,12 @@ voice input falls back to Chrome/Edge's built-in recognition. See `stt` in `docs
 - **Natural replies.** The tutor speaks with a local neural voice (Kokoro). Pick the voice and speed in ⚙.
 - **Headphones** work best. A filter drops speech that mostly repeats what the tutor just said, but headphones
   are more reliable.
-- **Privacy.** Chrome sends mic audio to Google for speech recognition. Everything else stays on your machine.
+- **Privacy.** With the Whisper helper, speech recognition runs on your machine. Only the browser fallback sends
+  mic audio to Google (Chrome) or Microsoft (Edge).
+- **One problem at a time.** The chat shows the current problem's conversation ("Chat for …"); earlier messages
+  are behind *show earlier*. Each study session starts a fresh tutor conversation.
 
-The quick-action buttons (Start session, Next problem, Hint, Submit, End) and the text box work too.
+The quick-action buttons (Start session, Next problem, Hint, Submit, Drill, End) and the text box work too.
 
 ### In the terminal
 Run `claude` in the repo and use the same slash commands. The web editor and dashboard still work alongside:
@@ -80,14 +84,20 @@ Run `claude` in the repo and use the same slash commands. The web editor and das
 | `/submit` | interviewer review, follow-ups, records the attempt |
 | `/abandon` | give up (no rating change, the problem stays unsolved and comes back later) |
 | `/status` | progress summary |
+| `/drill` | quick practice drill in the chat (`/drill all`, `/drill 2`, `/drill complexity`) |
 | `/end` | wrap up with three takeaways and the next focus |
 
 ## Pages
 
-- **Dashboard** `/`: rating, trend and label; topic ratings (weakest first, hatched = low confidence);
-  rating over time; weaknesses; reviews due; sheet completion; recent attempts; the voice tutor.
+- **Home** `/`: one obvious next step (start a session, resume the open problem, or the next problem), the
+  completion forecast, quick facts, and Mixed practice.
+- **Drill** `/drill`: Mixed practice across your focus areas, or practice on one; each answer gets feedback and
+  an explanation.
+- **Dashboard** `/dashboard`: rating, trend and label; completion forecast with a goal date; topic ratings
+  (weakest first, hatched = low confidence); rating over time; weaknesses with recent slips; reviews due; sheet
+  completion; recent attempts.
 - **Problem** `/problem/<slug>`: statement, Monaco Java editor (picks up edits from your IDE), test runner,
-  timer, hint level.
+  active-time timer, hint level.
 - **History** `/history`: every attempt with filters. Click one for rubric, rating changes, hints,
   weaknesses, notes and code.
 
@@ -118,7 +128,8 @@ prep context | stats        status for the tutor / progress summary
 prep next | start <slug>    pick / start a problem
 prep run-tests <slug>       compile and test Solution.java
 prep reviews                spaced-repetition queue
-prep weakness list
+prep weakness list | focus   your weaknesses / which one to probe or drill next
+prep stt-setup              install local Whisper speech recognition
 prep set --sheet neetcode150 --difficulty medium
 prep set --target-date 2027-03-31        # goal date for the completion forecast ("none" clears it)
 prep backup                 copy the DB to data/backups/prep-<timestamp>.db
@@ -129,20 +140,24 @@ Run `npx prep --help` for everything.
 ## Project layout
 
 ```
-core/      shared library: DB, rating engine, selection, spaced repetition, Java runner
+core/      shared library: DB + migrations, rating, selection, spaced repetition, weaknesses and drills,
+           active time, completion forecast, Java runner
 cli/       the `prep` CLI (single source of truth for state)
-server/    Express API + voice-tutor bridge (headless Claude Code) + local TTS
-web/       Vite + React app (home, dashboard, problem page, history, voice)
+server/    Express API, voice-tutor bridge (headless Claude Code), drill writer/grader, local TTS (Kokoro),
+           stt/ = the Whisper speech-recognition helper (Python)
+web/       Vite + React app (home, drill, dashboard, problem page, history, voice)
 harness/   Java test harness (per-test timeout, ListNode/TreeNode/design problems)
-problems/  one folder per problem: Problem.md, Solution.java, tests.json, notes.md
-data/      sheets (catalogs). Generated and ignored by git: prep.db, backups/, models/, tutor/
+problems/  one folder per problem: Problem.md, Solution.java, tests.json, notes.md, meta.json (tags)
+scripts/   fetch-neetcode.mjs rebuilds data/sheets/ from NeetCode's public data
+data/      sheets (catalogs). Generated and ignored by git: prep.db, backups/, models/, tutor/, stt/
 .claude/   slash commands; CLAUDE.md holds the tutor instructions
 ```
 
 ## Backups and data
 
 - `npm run backup` (or `npx prep backup`) snapshots the database to `data/backups/`.
-- `data/prep.db`, backups, the voice model and tutor transcripts are git-ignored.
+- `data/prep.db`, backups, the voice and speech models, the Whisper environment and tutor transcripts
+  (including archived conversations in `data/tutor/archive/`) are git-ignored.
 - `problems/` (your code and notes) is tracked.
 
 ## Troubleshooting
@@ -151,4 +166,6 @@ data/      sheets (catalogs). Generated and ignored by git: prep.db, backups/, m
 - **No voice.** Click anywhere on the page once (browsers block audio until you interact). If the neural voice
   fails, it falls back to the browser voice.
 - **The mic cuts you off.** Raise "Pause to send" in ⚙.
+- **Speech recognition is poor.** Check ⚙ shows "Whisper ready"; if not, run `npx prep stt-setup` and restart
+  `npm run dev` (`npx prep doctor` shows its state).
 - **Port in use.** Change `ports` in `prep.config.json`.

@@ -73,14 +73,6 @@ export interface Meta {
   idleGapMin: number;
 }
 
-export interface ProblemListItem {
-  slug: string;
-  title: string;
-  topic: string;
-  difficulty: Difficulty;
-  attempt: Attempt | null;
-}
-
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body: any) {
     super(message);
@@ -101,7 +93,6 @@ const p = (slug: string) => `/api/problems/${encodeURIComponent(slug)}`;
 
 export const api = {
   meta: () => call<Meta>('/api/meta'),
-  problems: () => call<ProblemListItem[]>('/api/problems'),
   problem: (slug: string) => call<ProblemData>(p(slug)),
   state: (slug: string) => call<ProblemState>(`${p(slug)}/state`),
   solution: (slug: string) => call<{ code: string | null; mtime: number | null }>(`${p(slug)}/solution`),

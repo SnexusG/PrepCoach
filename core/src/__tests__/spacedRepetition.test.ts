@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../config';
-import { addDays, initialInterval, isDue, scheduleReview, struggleReasons, toDateString, type ReviewState } from '../spacedRepetition';
+import { addDays, initialInterval, scheduleReview, struggleReasons, toDateString, type ReviewState } from '../spacedRepetition';
 
 const cfg = loadConfig();
 const today = new Date(2026, 10, 8); // 2026-11-08 local
@@ -58,10 +58,8 @@ describe('spaced repetition', () => {
     expect(struggleReasons({ ...clean, independence: undefined, approach: undefined }, cfg)).toEqual([]);
   });
 
-  it('handles month/year boundaries and due checks', () => {
+  it('handles month/year boundaries', () => {
     expect(toDateString(addDays(new Date(2026, 10, 29), 7))).toBe('2026-12-06');
     expect(toDateString(addDays(new Date(2026, 11, 30), 3))).toBe('2027-01-02');
-    expect(isDue({ dueDate: '2026-11-08' }, today)).toBe(true);
-    expect(isDue({ dueDate: '2026-11-09' }, today)).toBe(false);
   });
 });

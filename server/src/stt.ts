@@ -24,6 +24,7 @@ export class Stt {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private restarts = 0;
+  private stopping = false;
   private stderrTail = '';
 
   constructor(
@@ -56,6 +57,7 @@ export class Stt {
   }
 
   stop(): void {
+    this.stopping = true; // a deliberate stop must not look like a crash (which would schedule a restart)
     const p = this.proc;
     this.proc = null;
     p?.kill();
@@ -89,6 +91,7 @@ export class Stt {
   }
 
   private onExit(reason: string) {
+    if (this.stopping) return;
     if (!this.proc && this.state !== 'starting' && this.state !== 'ready') return;
     this.proc = null;
     const wasReady = this.state === 'ready';

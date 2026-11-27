@@ -252,7 +252,7 @@ export default function TutorPanel() {
           className={`mic ${t.listening ? 'on' : ''}`}
           onClick={t.toggleMic}
           disabled={!t.recognitionSupported}
-          title={t.recognitionSupported ? 'Hands-free: pause to send, talk over the tutor to interrupt' : 'Needs Chrome or Edge'}
+          title={t.recognitionSupported ? 'Hands-free: pause to send, talk over the tutor to interrupt' : 'Needs the local Whisper helper (npx prep stt-setup) or Chrome/Edge'}
         >
           {t.listening ? `🎙 Listening${t.sttInUse === 'whisper' ? ' (Whisper)' : ''} — click to mute` : '🎙 Start talking'}
         </button>
@@ -284,7 +284,7 @@ export default function TutorPanel() {
         {t.entries.length === 0 && (
           <div className="t-empty">
             Click <b>Start talking</b> and say “let’s start a session”, or use the buttons below.
-            {!t.recognitionSupported && <div>Voice input needs Chrome or Edge — you can still type.</div>}
+            {!t.recognitionSupported && <div>Voice input needs the local Whisper helper (`npx prep stt-setup`) or Chrome/Edge — you can still type.</div>}
           </div>
         )}
         {t.entries.length > 0 && visible.length === 0 && <div className="t-empty">No messages for this problem yet.</div>}

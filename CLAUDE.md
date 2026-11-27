@@ -18,8 +18,8 @@ Before anything else, run `npx prep context` and read it. It holds the user's ra
 
 ## Voice mode (web app)
 The web app (`npm run dev`, http://localhost:5173) runs this same tutor headless (`claude -p`, see
-`server/src/tutor.ts`) and turns it into a spoken conversation: the browser transcribes the user and reads your
-replies aloud. When the system prompt contains **VOICE MODE**, follow it — short spoken turns, no markdown in
+`server/src/tutor.ts`) and turns it into a spoken conversation: the user's speech is transcribed (local Whisper, or
+the browser as a fallback) and your replies are read aloud. When the system prompt contains **VOICE MODE**, follow it — short spoken turns, no markdown in
 speech, never read the statement aloud (it's on screen). Every rule below still applies.
 
 ## Hard rules

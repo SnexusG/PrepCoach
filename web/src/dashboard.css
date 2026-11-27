@@ -1,4 +1,4 @@
-/* Dashboard, history and nav styles (phase 6). Chart roles use the dark steps of the validated reference palette. */
+/* Home, drill, dashboard, history and nav styles. Chart roles use the dark steps of the validated reference palette. */
 :root {
   --series-1: #3987e5; /* blue — positive / magnitude */
   --series-neg: #e66767; /* red — diverging negative pole */
