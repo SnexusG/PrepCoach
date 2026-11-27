@@ -56,6 +56,50 @@ export interface PrepConfig {
   ports: { web: number; api: number };
   /** Voice tutor: the web server drives a headless Claude Code session (`claude -p`). Optional; defaults below. */
   tutor?: Partial<TutorConfig>;
+  /** Speech recognition for voice mode. Optional; defaults below. */
+  stt?: Partial<SttConfig>;
+}
+
+export interface SttConfig {
+  /** 'whisper' = local faster-whisper helper (falls back to the browser if unavailable); 'browser' = Chrome's recognition. */
+  engine: 'whisper' | 'browser';
+  /** Python interpreter for the helper; null = data/stt/venv (created by `prep stt-setup`), else `python`. */
+  python: string | null;
+  /** Whisper model on the GPU (any faster-whisper name, e.g. large-v3-turbo, distil-large-v3, small.en). */
+  model: string;
+  device: 'auto' | 'cuda' | 'cpu';
+  /** CTranslate2 compute type; auto = int8_float16 on CUDA, int8 on CPU. */
+  computeType: string;
+  /** Smaller model used when device is auto and no GPU is usable. */
+  cpuModel: string;
+  /** Beam search width: 5 is more accurate, 1 is faster. */
+  beamSize: number;
+  /** Extra words to bias recognition toward (added to the built-in programming glossary). */
+  extraVocabulary: string[];
+  /** Speech detection: Silero VAD probability that counts as speech (0–1). */
+  vadThreshold: number;
+  /** Sounds shorter than this are ignored (coughs, clicks). */
+  minSpeechMs: number;
+  /** While you talk, re-transcribe the audio so far this often for the live caption (0 = off). */
+  previewMs: number;
+}
+
+export const DEFAULT_STT_CONFIG: SttConfig = {
+  engine: 'whisper',
+  python: null,
+  model: 'large-v3-turbo',
+  device: 'auto',
+  computeType: 'auto',
+  cpuModel: 'small.en',
+  beamSize: 5,
+  extraVocabulary: [],
+  vadThreshold: 0.5,
+  minSpeechMs: 250,
+  previewMs: 1200,
+};
+
+export function sttConfig(cfg: PrepConfig): SttConfig {
+  return { ...DEFAULT_STT_CONFIG, ...(cfg.stt ?? {}) };
 }
 
 export interface ForecastConfig {
@@ -149,6 +193,14 @@ export function validateConfig(cfg: PrepConfig): void {
   if (t.tts && !['kokoro', 'browser'].includes(t.tts)) errors.push('tutor.tts must be "kokoro" or "browser"');
   if (t.ttsDtype && !['fp32', 'q8', 'q4'].includes(t.ttsDtype)) errors.push('tutor.ttsDtype must be "fp32", "q8" or "q4"');
   if (t.allowedTools && !Array.isArray(t.allowedTools)) errors.push('tutor.allowedTools must be an array of permission rules');
+  const s = cfg.stt ?? {};
+  if (s.engine && !['whisper', 'browser'].includes(s.engine)) errors.push('stt.engine must be "whisper" or "browser"');
+  if (s.device && !['auto', 'cuda', 'cpu'].includes(s.device)) errors.push('stt.device must be "auto", "cuda" or "cpu"');
+  if (s.beamSize !== undefined && !(Number.isInteger(s.beamSize) && s.beamSize >= 1)) errors.push('stt.beamSize must be an integer >= 1');
+  if (s.vadThreshold !== undefined && !(s.vadThreshold > 0 && s.vadThreshold < 1)) errors.push('stt.vadThreshold must be between 0 and 1');
+  if (s.minSpeechMs !== undefined && !(s.minSpeechMs >= 0)) errors.push('stt.minSpeechMs must be >= 0');
+  if (s.previewMs !== undefined && !(s.previewMs === 0 || s.previewMs >= 300)) errors.push('stt.previewMs must be 0 (off) or >= 300');
+  if (s.extraVocabulary !== undefined && !Array.isArray(s.extraVocabulary)) errors.push('stt.extraVocabulary must be an array of strings');
   if (cfg.ports.web === cfg.ports.api) errors.push('ports.web and ports.api must differ');
   if (errors.length) throw new Error(`Invalid prep.config.json:\n  - ${errors.join('\n  - ')}`);
 }

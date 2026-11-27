@@ -24,18 +24,26 @@ PrepCoach calls an LLM API directly.
 | Node.js | 20+ | server, web app, `prep` CLI |
 | JDK | 17+ (`javac` and `java` on PATH, or `JAVA_HOME`) | compiles and tests your solutions |
 | Claude Code | logged in (run `claude` once) | the tutor |
-| Chrome or Edge | recent | voice input (Web Speech API) |
+| Python + NVIDIA GPU | Python 3.9+, CUDA-capable GPU (optional) | accurate local speech recognition (Whisper); without them voice input uses the browser |
+| Chrome or Edge | recent | fallback voice input (Web Speech API) |
 
 ## Setup
 
 ```bash
 npm install
-npx prep doctor      # checks Node, JDK, the claude CLI, the database and the voice model
+npx prep doctor      # checks Node, JDK, the claude CLI, the database and the voice models
+npx prep stt-setup   # optional, recommended: local Whisper speech recognition (Python venv + ~1.6 GB model)
 npm run dev          # runs `prep init`, then starts the API (5175) and the web app (5173)
 ```
 
 Open **http://localhost:5173**. The first `npm run dev` downloads the Kokoro voice model (~310 MB) into
 `data/models/`. That happens once, in the background.
+
+**Speech recognition.** With `prep stt-setup` done, what you say is transcribed locally by Whisper
+(`large-v3-turbo` on an NVIDIA GPU, or `small.en` on the CPU), primed with the current problem, the names in your
+code and programming terms, so "HashMap", "deque" or "O of n log n" come through right. Speech detection runs in
+the browser; a pause ends your turn (**Pause to send** in the tutor's ⚙ settings). If the helper isn't available,
+voice input falls back to Chrome/Edge's built-in recognition. See `stt` in `docs/configuration.md`.
 
 ## Practising
 

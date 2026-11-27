@@ -74,6 +74,23 @@ Set a goal with `prep set --target-date 2027-02-28` (or on the dashboard); `--ta
 
 Voice, speed and pause length are per-browser settings in the tutor panel (⚙), not in this file.
 
+## `stt` (speech recognition in voice mode)
+| Key | Default | Meaning |
+|---|---|---|
+| `engine` | `whisper` | `whisper` = local faster-whisper helper (`prep stt-setup` installs it; falls back to the browser if it isn't running); `browser` = Chrome/Edge's built-in recognition |
+| `python` | `null` | interpreter for the helper; `null` = `data/stt/venv` if present, else `python` |
+| `model` | `large-v3-turbo` | Whisper model used on an NVIDIA GPU (any faster-whisper name: `distil-large-v3`, `medium.en`, `small.en` …); downloaded to `data/models/whisper/` on first start |
+| `device` | `auto` | `auto` tries CUDA, then the CPU with `cpuModel`; or force `cuda` / `cpu` |
+| `computeType` | `auto` | CTranslate2 precision: auto = `int8_float16` on CUDA (≈2–3 GB VRAM for turbo), `int8` on CPU |
+| `cpuModel` | `small.en` | model used when no GPU is usable (CPU large models are too slow for conversation) |
+| `beamSize` | 5 | beam search width; 1 is faster, 5 is more accurate |
+| `extraVocabulary` | `[]` | extra words to bias recognition toward. A programming glossary, the current problem and the identifiers in your `Solution.java` are always included |
+| `vadThreshold` | 0.5 | Silero speech-detection probability that counts as speech; raise it in a noisy room |
+| `minSpeechMs` | 250 | sounds shorter than this are ignored |
+| `previewMs` | 1200 | while you talk, the audio so far is re-transcribed this often for the live caption (`0` = off) |
+
+How long a pause ends your turn is the **Pause to send** slider in the tutor's voice settings.
+
 ## Environment variables
 | Variable | Effect |
 |---|---|

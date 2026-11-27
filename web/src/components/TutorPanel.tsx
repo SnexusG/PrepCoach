@@ -59,6 +59,19 @@ function VoiceView({ onExpand }: { onExpand: () => void }) {
   );
 }
 
+function SttStatusLine() {
+  const s = useTutor().sttStatus;
+  if (!s) return <p className="muted small">Whisper: server offline — the browser's recognition will be used.</p>;
+  if (s.state === 'ready') return <p className="muted small">Whisper ready: {s.model} on {s.device === 'cuda' ? 'your GPU' : 'the CPU'}.</p>;
+  if (s.state === 'starting') return <p className="muted small">Whisper is loading its model…</p>;
+  return (
+    <p className="t-warn small" title={s.error ?? ''}>
+      Whisper unavailable{s.state === 'disabled' ? ' (stt.engine is "browser" in prep.config.json)' : ' — run `npx prep stt-setup`'}; using the browser's
+      recognition.
+    </p>
+  );
+}
+
 function Settings({ onClose }: { onClose: () => void }) {
   const t = useTutor();
   const [voices, setVoices] = useState(englishVoices);
@@ -137,6 +150,18 @@ function Settings({ onClose }: { onClose: () => void }) {
         Speed {t.settings.rate.toFixed(2)}×
         <input type="range" min={0.8} max={1.5} step={0.05} value={t.settings.rate} onChange={(e) => t.updateSettings({ rate: +e.target.value })} />
       </label>
+      <label>
+        Recognition
+        <select
+          value={t.settings.sttEngine}
+          onChange={(e) => t.updateSettings({ sttEngine: e.target.value as 'whisper' | 'browser' })}
+          title="Applies the next time you turn the mic on"
+        >
+          <option value="whisper">Whisper (local, accurate)</option>
+          <option value="browser">Browser built-in (Chrome/Edge)</option>
+        </select>
+      </label>
+      {t.settings.sttEngine === 'whisper' && <SttStatusLine />}
       <label>
         <input type="checkbox" checked={t.settings.chatInVoice} onChange={(e) => t.updateSettings({ chatInVoice: e.target.checked })} />
         Show the chat while talking
@@ -219,7 +244,7 @@ export default function TutorPanel() {
           disabled={!t.recognitionSupported}
           title={t.recognitionSupported ? 'Hands-free: pause to send, talk over the tutor to interrupt' : 'Needs Chrome or Edge'}
         >
-          {t.listening ? '🎙 Listening — click to mute' : '🎙 Start talking'}
+          {t.listening ? `🎙 Listening${t.sttInUse === 'whisper' ? ' (Whisper)' : ''} — click to mute` : '🎙 Start talking'}
         </button>
       </div>
 

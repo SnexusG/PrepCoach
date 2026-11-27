@@ -22,10 +22,12 @@ import {
   problemFiles,
   readLastResults,
   runProblemTests,
+  sttConfig,
   tutorConfig,
   type AttemptRow,
 } from '@prepcoach/core';
 import { TutorBridge, type TutorEvent } from './tutor';
+import { buildPrompt, Stt } from './stt';
 import { Tts } from './tts';
 
 // The server only reads state and runs tests through the shared core library — the same code the CLI uses.
@@ -309,13 +311,60 @@ app.post(
   }),
 );
 
+// ---------------- local speech recognition (Whisper helper) ----------------
+const sttCfg = sttConfig(cfg);
+const stt = new Stt(sttCfg, paths.root);
+stt.start();
+
+app.get('/api/stt/status', (_req, res) => {
+  res.json({
+    ...stt.status(),
+    engine: sttCfg.engine,
+    vadThreshold: sttCfg.vadThreshold,
+    minSpeechMs: sttCfg.minSpeechMs,
+    previewMs: sttCfg.previewMs,
+  });
+});
+
+/** Words to expect: the open problem's title/topic and the identifiers in its Solution.java. */
+function sttPrompt(): string {
+  const open = db
+    .prepare(`SELECT problem_slug AS slug FROM attempts WHERE status = 'in_progress' ORDER BY id DESC LIMIT 1`)
+    .get() as { slug: string } | undefined;
+  if (!open) return buildPrompt({ extra: sttCfg.extraVocabulary });
+  const p = getProblem(db, open.slug);
+  return buildPrompt({ title: p.title, topic: p.topic, code: readIf(problemFiles(open.slug).solution), extra: sttCfg.extraVocabulary });
+}
+
+/** One utterance as raw 16 kHz mono float32 PCM (little-endian) → { text }. */
+app.post(
+  '/api/stt',
+  express.raw({ type: 'application/octet-stream', limit: '25mb' }),
+  wrap(async (req, res) => {
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || body.length === 0 || body.length % 4 !== 0) {
+      throw httpError(400, 'Body must be float32 PCM (application/octet-stream)');
+    }
+    if (stt.state !== 'ready') throw httpError(503, stt.error ?? `speech recognition is ${stt.state}`);
+    try {
+      res.json(await stt.transcribe(body, sttPrompt()));
+    } catch (e) {
+      throw httpError(502, (e as Error).message);
+    }
+  }),
+);
+
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     tutor.kill();
+    stt.stop();
     process.exit(0);
   });
 }
-process.on('exit', () => tutor.kill());
+process.on('exit', () => {
+  tutor.kill();
+  stt.stop();
+});
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 

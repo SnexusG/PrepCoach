@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Listener, recognitionSupported, SentenceStream, Speaker, synthesisSupported, type TtsEngine } from './speech';
+import { Listener, recognitionSupported as webSpeechSupported, SentenceStream, Speaker, synthesisSupported, type TtsEngine } from './speech';
+import { fetchSttStatus, WhisperListener, type SttStatus } from './whisper';
+
+export type SttEngine = 'whisper' | 'browser';
 
 export type TutorState = 'stopped' | 'starting' | 'idle' | 'thinking';
 
@@ -24,9 +27,12 @@ export interface VoiceSettings {
   pauseMs: number;
   /** Show the full chat while the mic is on (otherwise it collapses to a caption strip). */
   chatInVoice: boolean;
+  /** Speech recognition: local Whisper (falls back to the browser when unavailable) or the browser's own. */
+  sttEngine: SttEngine;
 }
 
 const DEFAULT_SETTINGS: VoiceSettings = {
+  sttEngine: 'whisper',
   voiceOut: true,
   engine: 'kokoro',
   kokoroVoice: 'am_michael',
@@ -48,6 +54,10 @@ interface TutorApi {
   /** Increments after every completed tutor turn — pages refetch on it (an attempt may have been recorded). */
   turns: number;
   settings: VoiceSettings;
+  /** The local Whisper helper's state (null until fetched / when the server is down). */
+  sttStatus: SttStatus | null;
+  /** Which recognizer the mic is using right now (null when it's off). */
+  sttInUse: SttEngine | null;
   recognitionSupported: boolean;
   synthesisSupported: boolean;
   send(text: string): void;
@@ -131,27 +141,74 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     [myId, hush],
   );
 
-  // ---- listener (hands-free) ----
-  const listener = useMemo(
-    () =>
-      new Listener({
-        onInterim: (t) => {
-          // Barge-in: real (non-echo) speech while the tutor talks stops the voice immediately.
-          if (t && speaker.speaking && !speaker.isEcho(t)) hush();
-          setInterim(t && speaker.echoWindow && speaker.isEcho(t) ? '' : t);
-        },
-        onUtterance: (t) => {
-          if (speaker.isEcho(t)) return; // the tutor's own voice through the speakers
-          send(t);
-        },
-        onError: (m) => setMicError(m),
-        onActiveChange: (a) => {
-          setListening(a);
-          if (a) setMicError(null);
-        },
-      }),
+  // ---- listeners (hands-free): local Whisper, or the browser's Web Speech as the fallback ----
+  const [sttStatus, setSttStatus] = useState<SttStatus | null>(null);
+  const [sttInUse, setSttInUse] = useState<SttEngine | null>(null);
+  const callbacks = useMemo(
+    () => ({
+      onInterim: (t: string) => {
+        // Barge-in: real (non-echo) speech while the tutor talks stops the voice immediately.
+        if (t && speaker.speaking && !speaker.isEcho(t)) hush();
+        setInterim(t && speaker.echoWindow && speaker.isEcho(t) ? '' : t);
+      },
+      onUtterance: (t: string) => {
+        if (speaker.isEcho(t)) return; // the tutor's own voice through the speakers
+        send(t);
+      },
+      onError: (m: string) => setMicError(m),
+      onActiveChange: (a: boolean) => {
+        setListening(a);
+        if (a) setMicError(null);
+        else setSttInUse(null);
+      },
+    }),
     [speaker, send, hush],
   );
+  const listener = useMemo(() => new Listener(callbacks), [callbacks]);
+  const whisper = useMemo(() => new WhisperListener(callbacks), [callbacks]);
+
+  // The helper loads its model at server start; poll until it settles, then now and then.
+  useEffect(() => {
+    let stop = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      const s = await fetchSttStatus();
+      if (stop) return;
+      setSttStatus(s);
+      timer = window.setTimeout(poll, !s || s.state === 'starting' ? 3000 : 30000);
+    };
+    void poll();
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  const startMic = useCallback(async () => {
+    if (listener.active || whisper.active) return;
+    const s = settings.sttEngine === 'whisper' ? await fetchSttStatus() : null;
+    if (s) setSttStatus(s);
+    if (s?.state === 'ready') {
+      setSttInUse('whisper');
+      whisper.start(s);
+      return;
+    }
+    if (!webSpeechSupported) {
+      setMicError(`Local speech recognition isn't available (${s?.error ?? s?.state ?? 'server offline'}), and this browser has no built-in one.`);
+      return;
+    }
+    setSttInUse('browser');
+    listener.start();
+    if (settings.sttEngine === 'whisper') {
+      const why = s?.state === 'starting' ? 'still loading' : s?.error ?? s?.state ?? 'server offline';
+      setMicError(`Whisper isn't available (${why}), so the browser's recognition is listening instead.`);
+    }
+  }, [listener, whisper, settings.sttEngine]);
+
+  const stopMic = useCallback(() => {
+    listener.stop();
+    whisper.stop();
+  }, [listener, whisper]);
 
   useEffect(() => {
     speaker.onSpeakingChange = setSpeaking;
@@ -162,6 +219,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     speaker.voiceURI = settings.voiceURI;
     speaker.rate = settings.rate;
     listener.pauseMs = settings.pauseMs;
+    whisper.pauseMs = settings.pauseMs;
     try {
       const changed = Object.fromEntries(
         Object.entries(settings).filter(([k, v]) => DEFAULT_SETTINGS[k as keyof VoiceSettings] !== v),
@@ -172,9 +230,9 @@ export function TutorProvider({ children }: { children: ReactNode }) {
       /* private mode */
     }
     if (!settings.voiceOut) speaker.cancel();
-  }, [settings, speaker, listener]);
+  }, [settings, speaker, listener, whisper]);
 
-  useEffect(() => () => listener.stop(), [listener]);
+  useEffect(() => () => stopMic(), [stopMic]);
 
   // ---- server events ----
   useEffect(() => {
@@ -238,11 +296,14 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     voiceError,
     turns,
     settings,
-    recognitionSupported,
+    sttStatus,
+    sttInUse,
+    // getUserMedia is all Whisper needs, so the mic works beyond Chrome/Edge when the helper is up.
+    recognitionSupported: webSpeechSupported || (sttStatus?.state === 'ready' && !!navigator.mediaDevices?.getUserMedia),
     synthesisSupported,
     send,
-    toggleMic: () => (listener.active ? listener.stop() : listener.start()),
-    startMic: () => listener.start(),
+    toggleMic: () => (listener.active || whisper.active ? stopMic() : void startMic()),
+    startMic: () => void startMic(),
     stopSpeaking: hush,
     preview: (text) => {
       hush();

@@ -191,8 +191,10 @@ npx prep doctor                  # check Node, JDK, claude CLI, DB, voice model
   the CLI does. `server/src/tutor.ts` (`TutorBridge`) runs one long-lived `claude -p` stream-json process with the
   VOICE MODE prompt appended and the `tutor.allowedTools` from the config. It persists the session id and emits a
   `navigate` event when it sees `npx prep start <slug>`. `server/src/tts.ts` is local Kokoro TTS (model in
-  `data/models/`).
+  `data/models/`). `server/src/stt.ts` runs `server/stt/whisper_server.py` (faster-whisper, venv from `prep stt-setup` in `data/stt/`)
+  over JSON lines and builds the vocabulary prompt; the browser does speech detection (`web/src/tutor/whisper.ts`,
+  Silero VAD, assets copied to `web/public/vad/` by `web/scripts/copy-vad-assets.mjs`) and posts each utterance.
 - `web/` is Vite + React + Monaco + Recharts. `src/api.ts` is the API client, `src/tutor/` holds the voice
-  conversation (Web Speech recognition, barge-in, TTS playback) and the pages are in `src/pages/`.
+  conversation (Whisper or Web Speech recognition, barge-in, TTS playback) and the pages are in `src/pages/`.
 - This file and `.claude/commands/*.md` are the tutor's runtime prompt, used by both the terminal and the
   headless voice tutor. Changing them changes tutor behaviour.

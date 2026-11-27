@@ -1,11 +1,16 @@
 import fs from 'node:fs';
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { Command, Option } from 'commander';
 import {
   checkJava,
   tutorConfig,
+  sttConfig,
+  sttArgs,
+  sttPython,
+  sttVenvDir,
+  STT_PACKAGES,
   DIFFICULTIES,
   abandonAttempt,
   activeSession,
@@ -555,12 +560,77 @@ program
       detail: tc.tts === 'browser' ? 'disabled (tutor.tts = "browser")' : cached ? 'cached in data/models/' : 'not downloaded yet — fetched automatically (~310 MB) on first `npm run dev`',
     });
 
+    const sc = sttConfig(cfg);
+    if (sc.engine === 'browser') {
+      checks.push({ name: 'Speech recognition', ok: true, detail: 'browser built-in (stt.engine = "browser")' });
+    } else {
+      const py = sttPython(paths.root, sc);
+      const probe = spawnSync(py, ['-c', 'import faster_whisper, ctranslate2; print(ctranslate2.get_cuda_device_count())'], {
+        encoding: 'utf8',
+        timeout: 60000,
+        windowsHide: true,
+      });
+      const gpus = Number(probe.stdout?.trim());
+      const whisperDir = path.join(paths.root, 'data', 'models', 'whisper');
+      const modelCached = fs.existsSync(whisperDir) && fs.readdirSync(whisperDir).some((d) => d.includes(sc.model));
+      checks.push({
+        name: 'Speech recognition',
+        ok: probe.status === 0,
+        detail:
+          probe.status === 0
+            ? `Whisper ${sc.model} · ${gpus > 0 ? `CUDA GPU found` : `no CUDA GPU → CPU with ${sc.cpuModel}`} · model ${modelCached ? 'cached' : 'not downloaded yet'}`
+            : `faster-whisper not installed for ${py} (voice mode falls back to the browser)`,
+        fix: 'Run `npx prep stt-setup`',
+      });
+    }
+
     out({ ok: checks.every((c) => c.ok), checks }, () => [
       ...checks.map((c) => `${c.ok ? '✓' : '✗'} ${c.name.padEnd(22)} ${c.detail}${!c.ok && c.fix ? `\n    → ${c.fix}` : ''}`),
       '',
       checks.every((c) => c.ok) ? 'All good — start with `npm run dev`.' : 'Fix the ✗ items above, then run `npx prep doctor` again.',
     ]);
     if (!checks.every((c) => c.ok)) process.exitCode = 1;
+  });
+
+// ---------------- stt-setup ----------------
+program
+  .command('stt-setup')
+  .description('install local Whisper speech recognition: a Python venv in data/stt/, faster-whisper + CUDA libraries, and the model')
+  .option('--python <exe>', 'Python 3.9+ used to create the venv', process.platform === 'win32' ? 'python' : 'python3')
+  .option('--skip-model', 'install packages only; the model downloads on the next `npm run dev`')
+  .action((o) => {
+    const sc = sttConfig(cfg);
+    const venv = sttVenvDir(paths.root);
+    const run = (exe: string, args: string[], what: string) => {
+      console.log(`→ ${what}`);
+      const r = spawnSync(exe, args, { stdio: 'inherit', windowsHide: true });
+      if (r.status !== 0) throw new Error(`${what} failed${r.error ? `: ${r.error.message}` : ` (exit ${r.status})`}`);
+    };
+    if (sc.python) console.log(`Note: stt.python is set to ${sc.python}; the server will use that interpreter, not this venv.`);
+    if (!fs.existsSync(venv)) run(o.python, ['-m', 'venv', venv], `creating ${rel(venv)}`);
+    const py = path.join(venv, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+    run(py, ['-m', 'pip', 'install', '--upgrade', 'pip'], 'upgrading pip');
+    const pkgs = process.platform === 'darwin' ? ['faster-whisper'] : STT_PACKAGES;
+    run(py, ['-m', 'pip', 'install', ...pkgs], `installing ${pkgs.join(', ')} (CUDA libraries are large)`);
+    if (o.skipModel) return console.log('Done. The model downloads the next time the server starts.');
+    console.log(`→ downloading and loading ${sc.model} (first time ≈1.6 GB) …`);
+    const check = spawnSync(py, sttArgs(paths.root, { ...sc, python: py }, ['--check']), {
+      encoding: 'utf8',
+      windowsHide: true,
+      env: { ...process.env, HF_HUB_DISABLE_SYMLINKS_WARNING: '1' },
+    });
+    const ready = check.stdout
+      .split('\n')
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
+      .find((m) => m?.type === 'ready' || m?.type === 'fatal');
+    if (ready?.type !== 'ready') throw new Error(`Whisper failed to load: ${ready?.error ?? check.stderr.trim().split('\n').slice(-3).join(' ')}`);
+    console.log(`✓ Whisper ready: ${ready.model} on ${ready.device} (${ready.computeType}). Restart \`npm run dev\` to use it.`);
   });
 
 // ---------------- ref-clean ----------------

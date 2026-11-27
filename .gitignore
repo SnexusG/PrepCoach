@@ -11,3 +11,5 @@ problems/*/.results.json
 .DS_Store
 data/tutor/
 data/models/
+web/public/vad/
+data/stt/

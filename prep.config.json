@@ -85,5 +85,15 @@
     "allowedTools": ["Bash(npx prep:*)", "Read", "Glob", "Grep", "Edit(problems/**)", "Write(problems/**)"],
     "tts": "kokoro",
     "ttsDtype": "fp32"
+  },
+  "stt": {
+    "engine": "whisper",
+    "model": "large-v3-turbo",
+    "device": "auto",
+    "beamSize": 5,
+    "extraVocabulary": [],
+    "vadThreshold": 0.5,
+    "minSpeechMs": 250,
+    "previewMs": 1200
   }
 }
