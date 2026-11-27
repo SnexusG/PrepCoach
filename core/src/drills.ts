@@ -2,15 +2,22 @@ import type { DB } from './db';
 import { getWeakness, recordDrill, type DrillRow } from './weaknesses';
 
 /**
- * Drill sets for the drill page: questions generated for one weakness (by a one-off Claude call in the server),
- * answered one at a time. Multiple choice and spot-the-bug are graded here; typed answers are graded by Claude.
+ * Drill sets for the drill page: questions generated (by a one-off Claude call in the server) for one weakness, or
+ * a **mixed** drill across several. Answered one at a time; multiple choice and spot-the-bug are graded here, typed
+ * answers by Claude. Finishing records one practice result per weakness the questions covered.
  */
 
+interface Base {
+  prompt: string;
+  explanation: string;
+  /** Weakness this question targets (set on every question of a mixed drill). */
+  weaknessId?: number;
+}
 export type DrillQuestion =
-  | { type: 'mcq'; prompt: string; code?: string; options: string[]; answer: number; explanation: string }
-  | { type: 'short'; prompt: string; code?: string; expected: string; explanation: string }
-  | { type: 'bug'; prompt: string; code: string; answer: number; explanation: string }
-  | { type: 'fix'; prompt: string; code: string; expected: string; explanation: string };
+  | (Base & { type: 'mcq'; code?: string; options: string[]; answer: number })
+  | (Base & { type: 'short'; code?: string; expected: string })
+  | (Base & { type: 'bug'; code: string; answer: number })
+  | (Base & { type: 'fix'; code: string; expected: string });
 
 export interface DrillAnswer {
   /** Option index (mcq), 1-based line (bug) or the typed text (short/fix). */
@@ -20,21 +27,29 @@ export interface DrillAnswer {
   gradedBy: 'auto' | 'claude';
 }
 
+/** What a drill is about: one weakness, or a mix of all open ones. */
+export type DrillTargetKey = number | 'mixed';
+
 export interface DrillSet {
   id: number;
-  weaknessId: number;
+  /** null for a mixed drill. */
+  weaknessId: number | null;
+  mixed: boolean;
   createdAt: string;
   status: 'ready' | 'in_progress' | 'done';
   questions: DrillQuestion[];
   answers: Record<number, DrillAnswer>;
-  drillId: number | null;
+  drillIds: number[];
   finishedAt: string | null;
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
-/** Keeps only well-formed questions (generated JSON is checked, never trusted). */
-export function validateQuestions(raw: unknown): DrillQuestion[] {
+/**
+ * Keeps only well-formed questions (generated JSON is checked, never trusted). With `weaknessIds`, each question
+ * must name one of them (mixed drills); otherwise any weakness id on a question is dropped.
+ */
+export function validateQuestions(raw: unknown, weaknessIds?: number[]): DrillQuestion[] {
   if (!Array.isArray(raw)) return [];
   const out: DrillQuestion[] = [];
   for (const q of raw as any[]) {
@@ -42,34 +57,61 @@ export function validateQuestions(raw: unknown): DrillQuestion[] {
     const explanation = str(q?.explanation);
     const code = str(q?.code) || undefined;
     if (!prompt || !explanation) continue;
+    let weaknessId: number | undefined;
+    if (weaknessIds) {
+      if (!weaknessIds.includes(Number(q.weaknessId))) continue;
+      weaknessId = Number(q.weaknessId);
+    }
+    const base = { prompt, explanation, ...(weaknessId ? { weaknessId } : {}) };
     if (q.type === 'mcq') {
       const options = Array.isArray(q.options) ? q.options.map(str).filter(Boolean) : [];
       if (options.length >= 2 && options.length <= 6 && Number.isInteger(q.answer) && q.answer >= 0 && q.answer < options.length) {
-        out.push({ type: 'mcq', prompt, code, options, answer: q.answer, explanation });
+        out.push({ ...base, type: 'mcq', code, options, answer: q.answer });
       }
     } else if (q.type === 'bug') {
       const lines = code?.split('\n').length ?? 0;
-      if (code && Number.isInteger(q.answer) && q.answer >= 1 && q.answer <= lines) out.push({ type: 'bug', prompt, code, answer: q.answer, explanation });
+      if (code && Number.isInteger(q.answer) && q.answer >= 1 && q.answer <= lines) out.push({ ...base, type: 'bug', code, answer: q.answer });
     } else if (q.type === 'short' || q.type === 'fix') {
       const expected = str(q.expected);
       if (!expected) continue;
-      if (q.type === 'fix' && !code) continue;
-      out.push(q.type === 'fix' ? { type: 'fix', prompt, code: code!, expected, explanation } : { type: 'short', prompt, code, expected, explanation });
+      if (q.type === 'fix') {
+        if (code) out.push({ ...base, type: 'fix', code, expected });
+      } else out.push({ ...base, type: 'short', code, expected });
     }
   }
   return out;
 }
 
-type Row = { id: number; weaknessId: number; createdAt: string; status: DrillSet['status']; questions: string; answers: string; drillId: number | null; finishedAt: string | null };
-const COLS = `id, weakness_id AS weaknessId, created_at AS createdAt, status, questions, answers, drill_id AS drillId, finished_at AS finishedAt`;
-const parse = (r: Row): DrillSet => ({ ...r, questions: JSON.parse(r.questions), answers: JSON.parse(r.answers) });
+type Row = {
+  id: number;
+  weaknessId: number | null;
+  mixed: number;
+  createdAt: string;
+  status: DrillSet['status'];
+  questions: string;
+  answers: string;
+  drillIds: string;
+  finishedAt: string | null;
+};
+const COLS = `id, weakness_id AS weaknessId, mixed, created_at AS createdAt, status, questions, answers, drill_ids AS drillIds,
+  finished_at AS finishedAt`;
+const parse = (r: Row): DrillSet => ({
+  ...r,
+  mixed: !!r.mixed,
+  questions: JSON.parse(r.questions),
+  answers: JSON.parse(r.answers),
+  drillIds: JSON.parse(r.drillIds),
+});
 
-export function createDrillSet(db: DB, weaknessId: number, questions: DrillQuestion[], now = new Date()): DrillSet {
-  if (!getWeakness(db, weaknessId)) throw new Error(`Weakness #${weaknessId} not found`);
+export function createDrillSet(db: DB, target: DrillTargetKey, questions: DrillQuestion[], now = new Date()): DrillSet {
   if (!questions.length) throw new Error('A drill needs at least one question');
+  const mixed = target === 'mixed';
+  if (!mixed && !getWeakness(db, target)) throw new Error(`Weakness #${target} not found`);
+  if (mixed && questions.some((q) => !q.weaknessId)) throw new Error('Every question of a mixed drill needs a weaknessId');
   const id = Number(
-    db.prepare('INSERT INTO drill_sets (weakness_id, created_at, questions) VALUES (?, ?, ?)').run(weaknessId, now.toISOString(), JSON.stringify(questions))
-      .lastInsertRowid,
+    db
+      .prepare('INSERT INTO drill_sets (weakness_id, mixed, created_at, questions) VALUES (?, ?, ?, ?)')
+      .run(mixed ? null : target, mixed ? 1 : 0, now.toISOString(), JSON.stringify(questions)).lastInsertRowid,
   );
   return getDrillSet(db, id);
 }
@@ -80,18 +122,24 @@ export function getDrillSet(db: DB, id: number): DrillSet {
   return parse(r);
 }
 
-/** An unstarted (ready) or unfinished set for this weakness, if one exists — newest first. */
-export function openDrillSet(db: DB, weaknessId: number): DrillSet | null {
+/** An unfinished (preferred) or ready set for this target, if one exists. */
+export function openDrillSet(db: DB, target: DrillTargetKey): DrillSet | null {
+  const where = target === 'mixed' ? 'mixed = 1' : 'mixed = 0 AND weakness_id = ?';
+  const args = target === 'mixed' ? [] : [target];
   const r = db
-    .prepare(`SELECT ${COLS} FROM drill_sets WHERE weakness_id = ? AND status IN ('in_progress', 'ready') ORDER BY status = 'in_progress' DESC, id DESC LIMIT 1`)
-    .get(weaknessId) as Row | undefined;
+    .prepare(`SELECT ${COLS} FROM drill_sets WHERE ${where} AND status IN ('in_progress', 'ready') ORDER BY status = 'in_progress' DESC, id DESC LIMIT 1`)
+    .get(...args) as Row | undefined;
   return r ? parse(r) : null;
 }
 
-/** Prompts of recent questions on a weakness, so new drills don't repeat them. */
+/** Prompts of recent questions on a weakness (from single and mixed drills), so new drills don't repeat them. */
 export function recentDrillPrompts(db: DB, weaknessId: number, limit = 20): string[] {
-  const rows = db.prepare('SELECT questions FROM drill_sets WHERE weakness_id = ? ORDER BY id DESC LIMIT 6').all(weaknessId) as { questions: string }[];
-  return rows.flatMap((r) => (JSON.parse(r.questions) as DrillQuestion[]).map((q) => q.prompt)).slice(0, limit);
+  const rows = db
+    .prepare('SELECT weakness_id AS weaknessId, mixed, questions FROM drill_sets WHERE weakness_id = ? OR mixed = 1 ORDER BY id DESC LIMIT 10')
+    .all(weaknessId) as { weaknessId: number | null; mixed: number; questions: string }[];
+  return rows
+    .flatMap((r) => (JSON.parse(r.questions) as DrillQuestion[]).filter((q) => !r.mixed || q.weaknessId === weaknessId).map((q) => q.prompt))
+    .slice(0, limit);
 }
 
 /** Grades what can be graded without Claude: multiple choice, spot-the-bug, and typed answers that match exactly. */
@@ -118,23 +166,46 @@ export function saveDrillAnswer(db: DB, id: number, index: number, a: DrillAnswe
   return getDrillSet(db, id);
 }
 
-/** Finishes a set: records the drill result on the weakness (practice — status unchanged) and returns it. */
-export function finishDrillSet(db: DB, id: number, opts: { sessionId?: number | null; now?: Date } = {}): { set: DrillSet; drill: DrillRow } {
+const getDrill = (db: DB, id: number) =>
+  db.prepare('SELECT id, weakness_id AS weaknessId, at, correct, total, note FROM weakness_drills WHERE id = ?').get(id) as DrillRow;
+
+/**
+ * Finishes a set: records one practice result per weakness covered by the answered questions (weakness status is
+ * unchanged), and returns them. Questions on a weakness that no longer exists are left out.
+ */
+export function finishDrillSet(db: DB, id: number, opts: { sessionId?: number | null; now?: Date } = {}): { set: DrillSet; drills: DrillRow[] } {
   const set = getDrillSet(db, id);
-  if (set.status === 'done' && set.drillId) {
-    const drill = db.prepare('SELECT id, weakness_id AS weaknessId, at, correct, total, note FROM weakness_drills WHERE id = ?').get(set.drillId) as DrillRow;
-    return { set, drill };
-  }
-  const answered = Object.entries(set.answers);
+  if (set.status === 'done') return { set, drills: set.drillIds.map((d) => getDrill(db, d)).filter(Boolean) };
+  const answered = Object.entries(set.answers).map(([i, a]) => ({ q: set.questions[Number(i)], a }));
   if (!answered.length) throw new Error('Answer at least one question first');
-  const correct = answered.filter(([, a]) => a.correct).length;
-  const missed = answered.filter(([, a]) => !a.correct).map(([i]) => set.questions[Number(i)].prompt.replace(/\s+/g, ' ').slice(0, 70));
-  const note = missed.length ? `missed: ${missed.join(' | ')}` : 'all correct';
+  const byWeakness = new Map<number, typeof answered>();
+  for (const x of answered) {
+    const wid = x.q.weaknessId ?? set.weaknessId;
+    if (wid == null || !getWeakness(db, wid)) continue;
+    byWeakness.set(wid, [...(byWeakness.get(wid) ?? []), x]);
+  }
   const now = opts.now ?? new Date();
   return db.transaction(() => {
-    const drill = recordDrill(db, set.weaknessId, { correct, total: answered.length, note, sessionId: opts.sessionId ?? null }, now);
-    db.prepare(`UPDATE drill_sets SET status = 'done', drill_id = ?, finished_at = ? WHERE id = ?`).run(drill.id, now.toISOString(), id);
-    return { set: getDrillSet(db, id), drill };
+    const drills = [...byWeakness].map(([wid, xs]) => {
+      const missed = xs.filter((x) => !x.a.correct).map((x) => x.q.prompt.replace(/\s+/g, ' ').slice(0, 70));
+      return recordDrill(
+        db,
+        wid,
+        {
+          correct: xs.filter((x) => x.a.correct).length,
+          total: xs.length,
+          note: (set.mixed ? 'mixed drill; ' : '') + (missed.length ? `missed: ${missed.join(' | ')}` : 'all correct'),
+          sessionId: opts.sessionId ?? null,
+        },
+        now,
+      );
+    });
+    db.prepare(`UPDATE drill_sets SET status = 'done', drill_ids = ?, finished_at = ? WHERE id = ?`).run(
+      JSON.stringify(drills.map((d) => d.id)),
+      now.toISOString(),
+      id,
+    );
+    return { set: getDrillSet(db, id), drills };
   })();
 }
 

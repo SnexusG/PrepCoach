@@ -80,7 +80,8 @@ Voice, speed and pause length are per-browser settings in the tutor panel (⚙),
 ## `drill` (the Drill page)
 | Key | Default | Meaning |
 |---|---|---|
-| `questions` | 5 | questions per drill (3–10) |
+| `questions` | 5 | questions per drill on one weakness (3–10) |
+| `mixedQuestions` | 8 | questions in an "all weaknesses" drill (3–15), spread over your open weaknesses, least recently drilled first; each weakness gets its own recorded score |
 | `generationModel` | `null` | model that writes the questions from your weakness and its noted slips (`null` = your Claude Code default). A set takes ~20–60 s, so the next drill is prepared in the background |
 | `gradingModel` | `haiku` | model that judges typed answers that don't match the expected answer exactly (a few seconds each) |
 

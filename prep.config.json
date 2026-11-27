@@ -91,6 +91,7 @@
   },
   "drill": {
     "questions": 5,
+    "mixedQuestions": 8,
     "generationModel": null,
     "gradingModel": "haiku"
   },

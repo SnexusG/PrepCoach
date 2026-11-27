@@ -343,17 +343,22 @@ app.get('/api/drills', (_req, res) => {
     lastDrill: w.drills[0] ?? null,
     ...drills.status(w.id),
   }));
-  res.json({ suggested: focus?.weakness.id ?? null, weaknesses: list });
+  res.json({
+    suggested: focus?.weakness.id ?? null,
+    weaknesses: list,
+    mixed: { ...drills.status('mixed'), weaknessCount: list.length, questions: drillConfig(cfg).mixedQuestions },
+  });
 });
 
-/** Start (or resume) a drill on a weakness; waits for generation if nothing is ready yet. */
+/** Start (or resume) a drill on a weakness, or `{ mixed: true }` for all of them; waits if nothing is ready yet. */
 app.post(
   '/api/drills/start',
   wrap(async (req, res) => {
+    const mixed = req.body?.mixed === true;
     const id = Number(req.body?.weaknessId);
-    if (!Number.isInteger(id) || id <= 0) throw httpError(400, 'Body must include "weaknessId"');
+    if (!mixed && (!Number.isInteger(id) || id <= 0)) throw httpError(400, 'Body must include "weaknessId" or "mixed": true');
     try {
-      res.json(publicDrillSet(await drills.ensure(id)));
+      res.json(publicDrillSet(await drills.ensure(mixed ? 'mixed' : id)));
     } catch (e) {
       throw httpError(502, `Couldn't prepare the drill: ${(e as Error).message}`);
     }
@@ -398,9 +403,9 @@ app.post(
 /** Finish: records the score on the weakness (practice only) and prepares the next drill in the background. */
 app.post('/api/drills/:id/finish', (req, res) => {
   try {
-    const { set, drill } = finishDrillSet(db, Number(req.params.id), { sessionId: activeSession(db)?.id ?? null });
+    const { set, drills: results } = finishDrillSet(db, Number(req.params.id), { sessionId: activeSession(db)?.id ?? null });
     drills.prepareNext();
-    res.json({ drill, set: publicDrillSet(set) });
+    res.json({ drills: results, set: publicDrillSet(set) });
   } catch (e) {
     throw httpError(400, (e as Error).message);
   }

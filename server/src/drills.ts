@@ -4,6 +4,7 @@ import {
   createDrillSet,
   focusWeakness,
   getWeakness,
+  listWeaknesses,
   openDrillSet,
   recentDrillPrompts,
   validateQuestions,
@@ -13,7 +14,9 @@ import {
   type DrillConfig,
   type DrillQuestion,
   type DrillSet,
+  type DrillTargetKey,
   type Track,
+  type WeaknessRow,
   type TutorConfig,
 } from '@prepcoach/core';
 
@@ -45,7 +48,9 @@ Question types:
 - "bug": code of 4–10 lines with exactly one buggy line; answer = that 1-based line number; prompt asks to find it.
 - "fix": code of 1–6 lines that's wrong; expected = the corrected code (just the changed line(s)).
 Every question has an explanation: 1–2 sentences on why the answer is right (shown after answering).
-Code is plain Java with no markdown fences. Mix the types (at least two different ones) to fit the gap.`;
+Code is plain Java with no markdown fences. Mix the types (at least two different ones) to fit the gap.
+In a mixed drill (several weaknesses, each with an id), set weaknessId on every question to the weakness it targets,
+write the requested number for each, and order the questions so the weaknesses alternate.`;
 
 const GEN_SCHEMA = {
   type: 'object',
@@ -62,6 +67,7 @@ const GEN_SCHEMA = {
           answer: { type: 'integer' },
           expected: { type: 'string' },
           explanation: { type: 'string' },
+          weaknessId: { type: 'integer' },
         },
         required: ['type', 'prompt', 'explanation'],
       },
@@ -123,8 +129,9 @@ function claudeJson<T>(bin: string, opts: { system: string; prompt: string; sche
 }
 
 export class DrillService {
-  private generating = new Map<number, Promise<DrillSet>>();
-  private errors = new Map<number, string>();
+  private generating = new Map<DrillTargetKey, Promise<DrillSet>>();
+  private errors = new Map<DrillTargetKey, string>();
+  private prepChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     private db: DB,
@@ -137,66 +144,106 @@ export class DrillService {
     return process.env.PREP_CLAUDE_BIN || this.tutor.claudeBin;
   }
 
-  status(weaknessId: number) {
+  status(target: DrillTargetKey) {
     return {
-      ready: !!openDrillSet(this.db, weaknessId),
-      generating: this.generating.has(weaknessId),
-      error: this.errors.get(weaknessId) ?? null,
+      ready: !!openDrillSet(this.db, target),
+      generating: this.generating.has(target),
+      error: this.errors.get(target) ?? null,
     };
   }
 
-  /** A ready or unfinished set for the weakness, generating one if needed (deduplicated). */
-  ensure(weaknessId: number): Promise<DrillSet> {
-    const open = openDrillSet(this.db, weaknessId);
+  /** A ready or unfinished set for the target, generating one if needed (deduplicated). */
+  ensure(target: DrillTargetKey): Promise<DrillSet> {
+    const open = openDrillSet(this.db, target);
     if (open) return Promise.resolve(open);
-    const running = this.generating.get(weaknessId);
+    const running = this.generating.get(target);
     if (running) return running;
-    const job = this.generate(weaknessId)
+    const job = (target === 'mixed' ? this.generateMixed() : this.generate(target))
       .then((qs) => {
-        this.errors.delete(weaknessId);
-        return createDrillSet(this.db, weaknessId, qs);
+        this.errors.delete(target);
+        return createDrillSet(this.db, target, qs);
       })
       .catch((e) => {
-        this.errors.set(weaknessId, (e as Error).message);
+        this.errors.set(target, (e as Error).message);
         throw e;
       })
-      .finally(() => this.generating.delete(weaknessId));
-    this.generating.set(weaknessId, job);
+      .finally(() => this.generating.delete(target));
+    this.generating.set(target, job);
     return job;
   }
 
-  /** Prepare the next suggested drill in the background so it starts instantly. */
+  /** Prepare the mixed drill and the suggested single one in the background (one after the other). */
   prepareNext(): void {
+    const prep = (t: DrillTargetKey) => () =>
+      this.ensure(t).catch((e) => console.error(`Drill preparation failed: ${(e as Error).message}`));
+    const open = listWeaknesses(this.db, this.track(), ['active', 'improving']);
+    if (!open.length) return;
+    this.prepChain = this.prepChain.then(prep('mixed'));
     const f = focusWeakness(this.db, this.track(), 'drill');
-    if (f) this.ensure(f.weakness.id).catch((e) => console.error(`Drill preparation failed: ${(e as Error).message}`));
+    if (f) this.prepChain = this.prepChain.then(prep(f.weakness.id));
   }
 
-  private async generate(weaknessId: number): Promise<DrillQuestion[]> {
-    const w = getWeakness(this.db, weaknessId);
-    if (!w) throw new Error(`Weakness #${weaknessId} not found`);
-    const full = weaknessesWithExamples(this.db, w.track).find((x) => x.id === weaknessId);
+  /** The prompt block describing one weakness: its gap, area, actual slips, last drill and questions to avoid. */
+  private describe(w: WeaknessRow, opts: { withId: boolean }): string {
+    const full = weaknessesWithExamples(this.db, w.track).find((x) => x.id === w.id);
     const slips = (full?.examples ?? []).filter((e) => e.kind === 'observed').map((e) => e.note ?? e.summary).filter(Boolean);
-    const avoid = recentDrillPrompts(this.db, weaknessId);
-    const prompt = [
-      `Weakness: ${w.description}`,
+    const avoid = recentDrillPrompts(this.db, w.id, opts.withId ? 8 : 20);
+    return [
+      `${opts.withId ? `Weakness id ${w.id}` : 'Weakness'}: ${w.description}`,
       `Area: ${w.area ?? 'unspecified'}${w.area && AREA_GUIDE[w.area] ? ` — ${AREA_GUIDE[w.area]}` : ''}`,
       slips.length ? `Their actual slips (aim at these):\n${slips.map((s) => `- ${s}`).join('\n')}` : '',
       full?.drills[0]?.note ? `Last drill result: ${full.drills[0].correct}/${full.drills[0].total}, ${full.drills[0].note}` : '',
       avoid.length ? `Don't repeat these earlier questions:\n${avoid.map((s) => `- ${s}`).join('\n')}` : '',
-      `Write exactly ${this.cfg.questions} questions.`,
     ]
       .filter(Boolean)
-      .join('\n\n');
+      .join('\n');
+  }
+
+  private async ask(prompt: string, weaknessIds?: number[]): Promise<DrillQuestion[]> {
     const out = await claudeJson<{ questions: unknown }>(this.bin, {
       system: GEN_SYSTEM,
       prompt,
       schema: GEN_SCHEMA,
       model: this.cfg.generationModel ?? this.tutor.model,
-      timeoutMs: 180_000,
+      timeoutMs: 240_000,
     });
-    const qs = validateQuestions(out.questions).slice(0, this.cfg.questions);
+    return validateQuestions(out.questions, weaknessIds);
+  }
+
+  private async generate(weaknessId: number): Promise<DrillQuestion[]> {
+    const w = getWeakness(this.db, weaknessId);
+    if (!w) throw new Error(`Weakness #${weaknessId} not found`);
+    const qs = (await this.ask(`${this.describe(w, { withId: false })}\n\nWrite exactly ${this.cfg.questions} questions.`)).slice(0, this.cfg.questions);
     if (qs.length < Math.min(3, this.cfg.questions)) throw new Error(`only ${qs.length} usable questions were generated`);
     return qs;
+  }
+
+  /**
+   * A drill across all open weaknesses: mixedQuestions spread over them, least recently drilled first (at most 3 on
+   * any one), each question tagged with the weakness it targets.
+   */
+  private async generateMixed(): Promise<DrillQuestion[]> {
+    const open = listWeaknesses(this.db, this.track(), ['active', 'improving']).sort(
+      (a, b) => (a.lastDrillAt ?? '').localeCompare(b.lastDrillAt ?? '') || b.timesObserved - a.timesObserved,
+    );
+    if (!open.length) throw new Error('No open weaknesses to drill');
+    const total = this.cfg.mixedQuestions;
+    const counts = new Map<number, number>();
+    for (let i = 0, given = 0; given < total && i < open.length * 3; i++) {
+      const w = open[i % open.length];
+      if ((counts.get(w.id) ?? 0) >= 3) continue;
+      counts.set(w.id, (counts.get(w.id) ?? 0) + 1);
+      given++;
+    }
+    const picked = open.filter((w) => counts.has(w.id));
+    const prompt = [
+      'Mixed drill across these weaknesses:',
+      ...picked.map((w) => `${this.describe(w, { withId: true })}\nQuestions for this weakness: ${counts.get(w.id)}`),
+      `Write ${total} questions in total, each with weaknessId set to the weakness it targets.`,
+    ].join('\n\n');
+    const qs = await this.ask(prompt, picked.map((w) => w.id));
+    if (qs.length < Math.min(4, total)) throw new Error(`only ${qs.length} usable questions were generated`);
+    return qs.slice(0, total);
   }
 
   /** Judge a typed answer that didn't match the expected one exactly. */

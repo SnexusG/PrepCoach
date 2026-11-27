@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   drillApi,
@@ -15,10 +15,14 @@ import { useTutor } from '../tutor/TutorContext';
 
 const areaLabel = (a: string | null) => (a ? WEAKNESS_AREA_LABELS[a] ?? a : 'General');
 
-// ---------------------------------------------------------------- pick a weakness
+type DrillList = Awaited<ReturnType<typeof drillApi.list>>;
+/** What the user chose: one weakness, or a mixed drill over all open ones. */
+type Choice = { kind: 'one'; weakness: DrillTarget } | { kind: 'mixed'; weaknesses: DrillTarget[]; ready: boolean };
 
-function Picker({ onStart }: { onStart: (w: DrillTarget) => void }) {
-  const [data, setData] = useState<{ suggested: number | null; weaknesses: DrillTarget[] } | null>(null);
+// ---------------------------------------------------------------- pick a drill
+
+function Picker({ onStart }: { onStart: (c: Choice) => void }) {
+  const [data, setData] = useState<DrillList | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     drillApi.list().then(setData, (e) => setError((e as Error).message));
@@ -36,17 +40,29 @@ function Picker({ onStart }: { onStart: (w: DrillTarget) => void }) {
     );
   }
   const ordered = [...data.weaknesses].sort((a, b) => (a.id === data.suggested ? -1 : b.id === data.suggested ? 1 : 0));
+  const areas = [...new Set(data.weaknesses.map((w) => areaLabel(w.area)))];
+  const m = data.mixed;
   return (
     <div className="drill-pick">
-      <h1>Drill a weakness</h1>
-      <p className="muted">Five quick questions aimed at one skill gap and your actual slips. About 3 minutes.</p>
+      <h1>Drill</h1>
+      <button className="drill-mixed" onClick={() => onStart({ kind: 'mixed', weaknesses: data.weaknesses, ready: m.ready })}>
+        <span className="drill-mixed-title">⚡ Mixed practice</span>
+        <span className="drill-mixed-sub">
+          {m.questions} questions across your {m.weaknessCount} focus area{m.weaknessCount === 1 ? '' : 's'} · about {Math.round(m.questions * 0.6)} minutes
+        </span>
+        <span className="drill-mixed-areas">{areas.join(' · ')}</span>
+        <span className="drill-mixed-go">{m.ready ? 'Start →' : m.generating ? 'Being prepared… start →' : 'Start (takes ~40 s to prepare) →'}</span>
+        {m.error && <span className="t-warn small">Last preparation failed: {m.error}</span>}
+      </button>
+
+      <h2 className="drill-or">Or practise one area</h2>
       <ul>
         {ordered.map((w) => (
           <li key={w.id} className={w.id === data.suggested ? 'suggested' : ''}>
-            <button className="drill-target" onClick={() => onStart(w)}>
+            <button className="drill-target" onClick={() => onStart({ kind: 'one', weakness: w })}>
               <span className="muted small">
                 {areaLabel(w.area)} · {w.status} · seen {w.timesObserved}×
-                {w.id === data.suggested && <b className="drill-badge">suggested</b>}
+                {w.id === data.suggested && <b className="drill-badge">least recently drilled</b>}
               </span>
               <span className="drill-target-desc">{w.description}</span>
               <span className="muted small">
@@ -217,17 +233,21 @@ function Question({
 
 // ---------------------------------------------------------------- the drill
 
-function Runner({ target, onExit }: { target: DrillTarget; onExit: (again: boolean) => void }) {
+function Runner({ choice, onExit }: { choice: Choice; onExit: () => void }) {
   const tutor = useTutor();
   const [set, setSet] = useState<DrillSet | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ correct: number; total: number } | null>(null);
+  const [done, setDone] = useState<{ weaknessId: number; correct: number; total: number }[] | null>(null);
+  const mixed = choice.kind === 'mixed';
+  const all = choice.kind === 'mixed' ? choice.weaknesses : [choice.weakness];
+  const weaknessOf = (q: DrillQuestion | undefined) =>
+    all.find((w) => w.id === (q?.weaknessId ?? (choice.kind === 'one' ? choice.weakness.id : -1)));
 
   useEffect(() => {
     let stop = false;
-    drillApi.start(target.id).then(
+    drillApi.start(choice.kind === 'mixed' ? 'mixed' : choice.weakness.id).then(
       (s) => {
         if (stop) return;
         setSet(s);
@@ -239,12 +259,12 @@ function Runner({ target, onExit }: { target: DrillTarget; onExit: (again: boole
     return () => {
       stop = true;
     };
-  }, [target.id]);
+  }, [choice]);
 
   const finish = useCallback(async (s: DrillSet) => {
     try {
       const r = await drillApi.finish(s.id);
-      setDone({ correct: r.drill.correct, total: r.drill.total });
+      setDone(r.drills);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -267,22 +287,27 @@ function Runner({ target, onExit }: { target: DrillTarget; onExit: (again: boole
     [set, busy, index],
   );
 
+  const title = choice.kind === 'mixed' ? 'a mix of your focus areas' : choice.weakness.description;
+
   if (error && !set) {
     return (
       <div className="drill-card">
         <div className="banner error">{error}</div>
-        <button onClick={() => onExit(false)}>← Back</button>
+        <button onClick={onExit}>← Back</button>
       </div>
     );
   }
   if (!set) {
+    const ready = choice.kind === 'mixed' ? choice.ready : choice.weakness.ready;
     return (
       <div className="drill-card drill-loading">
         <div className="spinner" />
         <div>
-          Writing your questions on <b>{target.description}</b>…
+          Writing your questions on <b>{title}</b>…
         </div>
-        <div className="muted small">{target.ready ? 'Almost there.' : 'Usually 20–40 seconds the first time; the next drill is prepared in the background.'}</div>
+        <div className="muted small">
+          {ready ? 'Almost there.' : `Usually ${mixed ? '30–60' : '20–40'} seconds the first time; the next drill is prepared in the background.`}
+        </div>
       </div>
     );
   }
@@ -291,25 +316,44 @@ function Runner({ target, onExit }: { target: DrillTarget; onExit: (again: boole
   const answeredCount = Object.keys(set.answers).length;
   const result = set.answers[index] ?? null;
   const last = index === total - 1;
+  const q = set.questions[index];
+  const qw = weaknessOf(q);
 
   if (done) {
+    const correct = done.reduce((n, d) => n + d.correct, 0);
+    const outOf = done.reduce((n, d) => n + d.total, 0);
     return (
       <div className="drill-card">
-        <div className="muted small">{areaLabel(target.area)}</div>
+        <div className="muted small">{mixed ? 'Mixed practice' : areaLabel(all[0].area)}</div>
         <h2>
-          {done.correct}/{done.total} — {done.correct === done.total ? 'clean sweep' : done.correct >= done.total * 0.6 ? 'solid' : 'worth another round'}
+          {correct}/{outOf} — {correct === outOf ? 'clean sweep' : correct >= outOf * 0.6 ? 'solid' : 'worth another round'}
         </h2>
+        {mixed && done.length > 0 && (
+          <ul className="drill-breakdown">
+            {done.map((d) => {
+              const w = all.find((x) => x.id === d.weaknessId);
+              return (
+                <li key={d.weaknessId}>
+                  <b className={d.correct === d.total ? 'st solved' : d.correct === 0 ? 'down' : ''}>
+                    {d.correct}/{d.total}
+                  </b>{' '}
+                  {w?.description ?? `weakness #${d.weaknessId}`} <span className="muted small">({areaLabel(w?.area ?? null)})</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
         <ul className="drill-recap">
-          {set.questions.map((q, i) => (
+          {set.questions.map((qq, i) => (
             <li key={i} className={set.answers[i] ? (set.answers[i].correct ? 'right' : 'wrong') : 'skipped'}>
-              {set.answers[i] ? (set.answers[i].correct ? '✓' : '✗') : '–'} {q.prompt}
+              {set.answers[i] ? (set.answers[i].correct ? '✓' : '✗') : '–'} {qq.prompt}
             </li>
           ))}
         </ul>
-        <p className="muted small">Drills are practice: they don't change the weakness's status — clean work on real problems does.</p>
+        <p className="muted small">Drills are practice: they don't change a weakness's status — clean work on real problems does.</p>
         <div className="drill-actions">
-          <button className="cta" onClick={() => onExit(true)}>
-            Drill another
+          <button className="cta" onClick={onExit}>
+            Drill again
           </button>
           <Link to="/">Back home</Link>
         </div>
@@ -320,9 +364,7 @@ function Runner({ target, onExit }: { target: DrillTarget; onExit: (again: boole
   return (
     <div className="drill-card">
       <div className="drill-head">
-        <span className="muted small">
-          {areaLabel(target.area)} · {target.description}
-        </span>
+        <span className="muted small">{mixed ? 'Mixed practice' : `${areaLabel(all[0].area)} · ${title}`}</span>
         <span className="drill-dots" aria-label={`Question ${index + 1} of ${total}`}>
           {set.questions.map((_, i) => (
             <i key={i} className={`${i === index ? 'cur' : ''} ${set.answers[i] ? (set.answers[i].correct ? 'right' : 'wrong') : ''}`} />
@@ -331,8 +373,14 @@ function Runner({ target, onExit }: { target: DrillTarget; onExit: (again: boole
       </div>
       <div className="muted small">
         Question {index + 1} of {total}
+        {mixed && qw && (
+          <span className="drill-q-weakness">
+            {' '}
+            · {areaLabel(qw.area)}: {qw.description}
+          </span>
+        )}
       </div>
-      <Question q={set.questions[index]} index={index} result={result} busy={busy} onAnswer={answer} />
+      <Question q={q} index={index} result={result} busy={busy} onAnswer={answer} />
       {error && <div className="banner error">{error}</div>}
       <div className="drill-actions">
         {result && !last && (
@@ -348,9 +396,9 @@ function Runner({ target, onExit }: { target: DrillTarget; onExit: (again: boole
         {result && (
           <button
             onClick={() => {
-              const q = set.questions[index];
+              const fence = '```';
               tutor.send(
-                `About a drill question on "${target.description}": ${q.prompt}${q.code ? `\n\`\`\`java\n${q.code}\n\`\`\`` : ''}\n` +
+                `About a drill question on "${qw?.description ?? title}": ${q.prompt}${q.code ? `\n${fence}java\n${q.code}\n${fence}` : ''}\n` +
                   `I answered ${JSON.stringify(q.type === 'mcq' ? q.options[Number(result.answer)] : result.answer)} and it was marked ${result.correct ? 'right' : 'wrong'}. Can you explain it?`,
               );
             }}
@@ -372,36 +420,41 @@ function Runner({ target, onExit }: { target: DrillTarget; onExit: (again: boole
 
 export default function Drill() {
   const [params, setParams] = useSearchParams();
-  const [target, setTarget] = useState<DrillTarget | null>(null);
+  const [choice, setChoice] = useState<Choice | null>(null);
   const [round, setRound] = useState(0);
-  const wanted = useMemo(() => Number(params.get('w')) || null, [params]);
 
-  // /drill?w=<id> starts that weakness directly (e.g. from the home page).
+  // /drill?mixed=1 starts the mixed drill directly (the home page's Quick drill); /drill?w=<id> one weakness.
   useEffect(() => {
-    if (!wanted || target) return;
+    if (choice) return;
+    const w = Number(params.get('w')) || null;
+    if (!w && params.get('mixed') !== '1') return;
     drillApi.list().then((d) => {
-      const w = d.weaknesses.find((x) => x.id === wanted);
-      if (w) setTarget(w);
+      if (w) {
+        const t = d.weaknesses.find((x) => x.id === w);
+        if (t) setChoice({ kind: 'one', weakness: t });
+      } else if (d.weaknesses.length) {
+        setChoice({ kind: 'mixed', weaknesses: d.weaknesses, ready: d.mixed.ready });
+      }
     });
-  }, [wanted, target]);
+  }, [params, choice]);
 
   return (
     <div className="dash-page">
       <NavBar />
       <div className="dash-layout">
         <main className="dash drill">
-          {target ? (
+          {choice ? (
             <Runner
-              key={`${target.id}-${round}`}
-              target={target}
+              key={`${choice.kind === 'mixed' ? 'mixed' : choice.weakness.id}-${round}`}
+              choice={choice}
               onExit={() => {
-                setTarget(null);
+                setChoice(null);
                 setRound((r) => r + 1);
                 setParams({});
               }}
             />
           ) : (
-            <Picker key={round} onStart={setTarget} />
+            <Picker key={round} onStart={setChoice} />
           )}
         </main>
         <aside className="dash-tutor">

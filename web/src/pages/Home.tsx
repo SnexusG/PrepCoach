@@ -61,9 +61,9 @@ function DsaCard({ data }: { data: Dashboard | null }) {
         )}
         {!open && (data?.stats.weaknesses.active ?? 0) + (data?.stats.weaknesses.improving ?? 0) > 0 && (
           <button
-            onClick={() => navigate('/drill')}
+            onClick={() => navigate('/drill?mixed=1')}
             disabled={busy || !t.connected}
-            title="2–4 minutes of quick questions on one of your weaknesses (rotates)"
+            title="Mixed practice: quick questions across your focus areas"
           >
             ⚡ Quick drill
           </button>

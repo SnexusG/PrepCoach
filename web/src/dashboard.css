@@ -254,3 +254,21 @@ pre.code { background: var(--bg); border: 1px solid var(--border); border-radius
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--track); border-top-color: var(--accent);
   animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.drill-pick h1 { margin-bottom: 14px; }
+.drill-mixed {
+  width: 100%; text-align: left; display: flex; flex-direction: column; gap: 6px; padding: 22px 24px; cursor: pointer;
+  font: inherit; color: var(--text); border-radius: 14px; border: 2px solid var(--accent);
+  background: linear-gradient(135deg, rgba(91, 157, 255, 0.22), rgba(91, 157, 255, 0.06) 60%), var(--panel);
+}
+.drill-mixed:hover { filter: brightness(1.08); }
+.drill-mixed-title { font-size: 22px; font-weight: 700; }
+.drill-mixed-sub { font-size: 15px; }
+.drill-mixed-areas { font-size: 13px; color: var(--muted); }
+.drill-mixed-go { margin-top: 6px; align-self: flex-start; background: var(--accent); color: #0d1420; font-weight: 600;
+  padding: 8px 16px; border-radius: 8px; }
+.drill-or { font-size: 14px; font-weight: 600; color: var(--muted); margin: 26px 0 0; text-transform: uppercase; letter-spacing: 0.04em; }
+.drill-pick ul { margin-top: 10px; }
+.drill-target { padding: 10px 14px; }
+.drill-target-desc { font-size: 14px; }
+.drill-q-weakness { color: var(--accent); }
+.drill-breakdown { list-style: none; padding: 0; margin: 0 0 4px; display: flex; flex-direction: column; gap: 4px; }

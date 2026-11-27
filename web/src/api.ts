@@ -277,11 +277,17 @@ export const fmtDelta = (d: number | null) => (d == null ? '—' : `${d >= 0 ? '
 
 // ---------------- drills ----------------
 
+interface DrillQBase {
+  prompt: string;
+  explanation?: string;
+  /** The weakness a mixed-drill question targets. */
+  weaknessId?: number;
+}
 export type DrillQuestion =
-  | { type: 'mcq'; prompt: string; code?: string; options: string[]; answer?: number; explanation?: string }
-  | { type: 'short'; prompt: string; code?: string; expected?: string; explanation?: string }
-  | { type: 'bug'; prompt: string; code: string; answer?: number; explanation?: string }
-  | { type: 'fix'; prompt: string; code: string; expected?: string; explanation?: string };
+  | (DrillQBase & { type: 'mcq'; code?: string; options: string[]; answer?: number })
+  | (DrillQBase & { type: 'short'; code?: string; expected?: string })
+  | (DrillQBase & { type: 'bug'; code: string; answer?: number })
+  | (DrillQBase & { type: 'fix'; code: string; expected?: string });
 
 export interface DrillAnswer {
   answer: number | string;
@@ -292,7 +298,9 @@ export interface DrillAnswer {
 
 export interface DrillSet {
   id: number;
-  weaknessId: number;
+  /** null for a mixed drill. */
+  weaknessId: number | null;
+  mixed: boolean;
   status: 'ready' | 'in_progress' | 'done';
   /** Unanswered questions come without their answer and explanation. */
   questions: DrillQuestion[];
@@ -312,12 +320,20 @@ export interface DrillTarget {
 }
 
 export const drillApi = {
-  list: () => call<{ suggested: number | null; weaknesses: DrillTarget[] }>('/api/drills'),
-  start: (weaknessId: number) => call<DrillSet>('/api/drills/start', { method: 'POST', body: JSON.stringify({ weaknessId }) }),
+  list: () =>
+    call<{
+      suggested: number | null;
+      weaknesses: DrillTarget[];
+      mixed: { ready: boolean; generating: boolean; error: string | null; weaknessCount: number; questions: number };
+    }>('/api/drills'),
+  /** A weakness id, or 'mixed' for a drill across all open weaknesses. */
+  start: (target: number | 'mixed') =>
+    call<DrillSet>('/api/drills/start', { method: 'POST', body: JSON.stringify(target === 'mixed' ? { mixed: true } : { weaknessId: target }) }),
   answer: (id: number, index: number, answer: number | string) =>
     call<{ result: DrillAnswer; question: DrillQuestion; set: DrillSet }>(`/api/drills/${id}/answer`, {
       method: 'POST',
       body: JSON.stringify({ index, answer }),
     }),
-  finish: (id: number) => call<{ drill: { correct: number; total: number; note: string | null } }>(`/api/drills/${id}/finish`, { method: 'POST' }),
+  finish: (id: number) =>
+    call<{ drills: { weaknessId: number; correct: number; total: number; note: string | null }[] }>(`/api/drills/${id}/finish`, { method: 'POST' }),
 };

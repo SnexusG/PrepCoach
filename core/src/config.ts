@@ -67,15 +67,17 @@ export interface PrepConfig {
 }
 
 export interface DrillConfig {
-  /** Questions per drill. */
+  /** Questions per drill on one weakness. */
   questions: number;
+  /** Questions in a mixed drill across all open weaknesses (spread over them, least recently drilled first). */
+  mixedQuestions: number;
   /** Model that writes drill questions (null = your Claude Code default). */
   generationModel: string | null;
   /** Model that grades typed answers (small and fast is fine). */
   gradingModel: string | null;
 }
 
-export const DEFAULT_DRILL_CONFIG: DrillConfig = { questions: 5, generationModel: null, gradingModel: 'haiku' };
+export const DEFAULT_DRILL_CONFIG: DrillConfig = { questions: 5, mixedQuestions: 8, generationModel: null, gradingModel: 'haiku' };
 
 export function drillConfig(cfg: PrepConfig): DrillConfig {
   return { ...DEFAULT_DRILL_CONFIG, ...(cfg.drill ?? {}) };
@@ -235,6 +237,9 @@ export function validateConfig(cfg: PrepConfig): void {
   const dr = cfg.drill ?? {};
   if (dr.questions !== undefined && !(Number.isInteger(dr.questions) && dr.questions >= 3 && dr.questions <= 10)) {
     errors.push('drill.questions must be an integer 3–10');
+  }
+  if (dr.mixedQuestions !== undefined && !(Number.isInteger(dr.mixedQuestions) && dr.mixedQuestions >= 3 && dr.mixedQuestions <= 15)) {
+    errors.push('drill.mixedQuestions must be an integer 3–15');
   }
   const s = cfg.stt ?? {};
   if (s.engine && !['whisper', 'browser'].includes(s.engine)) errors.push('stt.engine must be "whisper" or "browser"');

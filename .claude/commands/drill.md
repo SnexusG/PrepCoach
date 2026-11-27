@@ -1,6 +1,6 @@
 ---
 description: Short drill (2–4 minutes) on one of your weaknesses
-argument-hint: "[optional: weakness id or area, e.g. '2' or 'complexity']"
+argument-hint: "[optional: 'all', a weakness id or an area, e.g. '2' or 'complexity']"
 allowed-tools: Bash(npx prep:*)
 ---
 Run a short drill on one weakness. User arguments: `$ARGUMENTS`
@@ -13,6 +13,9 @@ Drills are quick practice on the **skill gap**, not on a problem: they never use
 the user hasn't solved (no spoilers), and they don't count as hints.
 
 1. **Pick the weakness.**
+   - `all` (or "everything", "mixed") → a **mixed drill**: 7–8 questions spread over all active and improving
+     weaknesses (least recently drilled first, at most 3 each), alternating between them; announce which weakness
+     each question is about, and at the end record one result per weakness with `npx prep drill record`.
    - A number in the arguments → that weakness id. An area name (complexity, java, …) →
      `npx prep weakness focus --drill --area <area>`.
    - Otherwise `npx prep weakness focus --drill` (it rotates: least recently drilled first).
