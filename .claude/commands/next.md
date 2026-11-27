@@ -14,13 +14,15 @@ Serve the next problem. User arguments: `$ARGUMENTS`
    (scaffold → tag secondary topics → own-words `Problem.md` → stub `Solution.java` → `tests.json` with edge
    cases → verify against a private reference outside the repo → delete the reference). Do this quietly; don't
    show tests, reference code or hints.
-3. **Start.** Run `npx prep start <slug>` (it auto-detects reviews; it starts the timer).
+3. **Start.** Run `npx prep start <slug>` (it auto-detects reviews; it starts the timer). Note the
+   "Probe this attempt" weakness silently — you'll test it during the problem (CLAUDE.md → Deliberate probing).
 4. **Present** concisely in the chat:
    - title, topic, difficulty, and the reason it was chosen (from `prep next`), plus "REVIEW" if it is one;
    - the statement from `Problem.md` (constraints and examples included);
    - "Open in the editor: http://localhost:5173/problem/<slug>" (or edit `problems/<slug>/Solution.java` in the IDE);
-   - **if an active weakness matches this topic** (or is general), a one-line heads-up — without hinting
-     at the approach. E.g. "Last time you missed the empty-array case — keep an eye on that."
+   - **if another active weakness is relevant** (not the one you're probing), a one-line heads-up using a past
+     slip as the example — without hinting at the approach. E.g. "Last time you priced a HashMap insert at log n —
+     keep operation costs in mind."
 5. Ask for the approach: "Walk me through your approach and its time/space complexity before you code."
    For reviews: "Explain the approach and complexity, then code it quickly."
 Then follow the interviewer rules in CLAUDE.md (probe, don't confirm optimality, don't give hints).

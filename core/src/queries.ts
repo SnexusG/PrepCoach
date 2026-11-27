@@ -6,7 +6,7 @@ import { isLowConfidence, ratingLabel } from './rating';
 import { selectNext, type ProblemInfo, type Selection, type TopicStat } from './selection';
 import { activeSession, type SessionRow } from './sessions';
 import { toDateString, addDays } from './spacedRepetition';
-import { listWeaknesses, type WeaknessRow } from './weaknesses';
+import { focusWeakness, listDrills, listWeaknesses, type DrillRow, type WeaknessFocus, type WeaknessRow } from './weaknesses';
 import { problemFiles, sheetName } from './catalog';
 import { liveActiveTime } from './activity';
 import { activeTimeByDifficulty, getForecast, type ActiveTimeStat, type Forecast } from './forecast';
@@ -201,14 +201,6 @@ export function nextProblem(db: DB, cfg: PrepConfig, opts: NextOptions = {}): Ne
   const excludeSlugs = session
     ? listAttempts(db, { sessionId: session.id, status: 'abandoned' }).map((a) => a.slug)
     : [];
-  const activeWeaknesses = listWeaknesses(db, prefs.track, ['active']).map((w) => ({
-    id: w.id,
-    topic: w.topic,
-    description: w.description,
-    timesObserved: w.timesObserved,
-    lastSeen: w.lastSeen,
-  }));
-
   if (opts.topic) {
     const known = topicStats.find((t) => t.topic.toLowerCase() === opts.topic!.toLowerCase());
     if (!known) throw new Error(`Unknown topic "${opts.topic}". Topics: ${topicStats.map((t) => t.topic).join(', ')}`);
@@ -219,7 +211,6 @@ export function nextProblem(db: DB, cfg: PrepConfig, opts: NextOptions = {}): Ne
     {
       problems,
       topicStats,
-      activeWeaknesses,
       dueReviews,
       reviewsServedThisSession: session?.reviewsServed ?? 0,
       excludeSlugs,
@@ -356,17 +347,22 @@ export function getStats(db: DB, cfg: PrepConfig, now = new Date()): Stats {
 // ---------- weakness examples ----------
 
 export interface WeaknessWithExamples extends WeaknessRow {
-  examples: { attemptId: number; slug: string; kind: string; date: string; summary: string | null; note: string | null }[];
+  examples: { attemptId: number; slug: string; kind: string; date: string; summary: string | null; note: string | null; probed: boolean }[];
+  drills: DrillRow[];
 }
 
 export function weaknessesWithExamples(db: DB, track: Track, statuses?: WeaknessRow['status'][]): WeaknessWithExamples[] {
   const ex = db.prepare(
     `SELECT wa.attempt_id AS attemptId, a.problem_slug AS slug, wa.kind, COALESCE(a.finished_at, a.started_at) AS date,
-            a.tutor_summary AS summary, wa.note
+            a.tutor_summary AS summary, wa.note, wa.probed
      FROM weakness_attempts wa JOIN attempts a ON a.id = wa.attempt_id
      WHERE wa.weakness_id = ? ORDER BY a.id DESC LIMIT 3`,
   );
-  return listWeaknesses(db, track, statuses).map((w) => ({ ...w, examples: ex.all(w.id) as WeaknessWithExamples['examples'] }));
+  return listWeaknesses(db, track, statuses).map((w) => ({
+    ...w,
+    examples: (ex.all(w.id) as (Omit<WeaknessWithExamples['examples'][number], 'probed'> & { probed: number })[]).map((e) => ({ ...e, probed: !!e.probed })),
+    drills: listDrills(db, w.id),
+  }));
 }
 
 // ---------- context ----------
@@ -377,6 +373,9 @@ export interface ContextData {
   session: SessionRow | undefined;
   stats: Stats;
   weaknesses: WeaknessWithExamples[];
+  /** Suggested weakness to probe on the next problem / to drill (rotating). */
+  probeFocus: WeaknessFocus | null;
+  drillFocus: WeaknessFocus | null;
   recent: AttemptSummary[];
   open: AttemptSummary[];
   abandoned: (SheetProblemStatus & { lastAbandonedAt: string })[];
@@ -396,6 +395,8 @@ export function getContext(db: DB, cfg: PrepConfig, now = new Date()): ContextDa
     session: activeSession(db),
     stats,
     weaknesses: weaknessesWithExamples(db, prefs.track, ['active', 'improving']),
+    probeFocus: focusWeakness(db, prefs.track, 'probe'),
+    drillFocus: focusWeakness(db, prefs.track, 'drill'),
     recent: listAttempts(db, { track: prefs.track, limit: 6 }).filter((a) => a.status !== 'in_progress').slice(0, 5),
     open: listAttempts(db, { track: prefs.track, status: 'in_progress', cfg }),
     abandoned: sheetProblems(db, prefs.sheet).filter((p) => p.status === 'abandoned') as ContextData['abandoned'],
@@ -483,11 +484,20 @@ export function renderContextMarkdown(c: ContextData): string {
   for (const w of c.weaknesses) {
     L.push(
       `- #${w.id} [${w.area ?? 'no area'}${w.topic ? ` · ${w.topic}` : ''}] **${w.description}** — ${w.status}, seen ${w.timesObserved}×, last ${day(w.lastSeen)}` +
-        (w.status === 'improving' ? `, clean ${w.cleanDemonstrations}×` : ''),
+        (w.status === 'improving' ? `, clean ${w.cleanDemonstrations}×` : '') +
+        (w.drills[0] ? `, last drill ${w.drills[0].correct}/${w.drills[0].total} on ${day(w.drills[0].at)}${w.drills[0].note ? ` (${w.drills[0].note})` : ''}` : ''),
     );
     for (const e of w.examples.slice(0, 2)) {
-      L.push(`  - ${e.kind === 'observed' ? 'seen on' : 'handled well on'} ${e.slug} (${day(e.date)}): ${e.note ?? e.summary ?? ''}`);
+      L.push(
+        `  - ${e.kind === 'observed' ? 'seen on' : 'handled well on'} ${e.slug} (${day(e.date)})${e.probed ? ' [probed]' : ''}: ${e.note ?? e.summary ?? ''}`,
+      );
     }
+  }
+  if (c.probeFocus || c.drillFocus) {
+    L.push(
+      `- Next to probe: ${c.probeFocus ? `#${c.probeFocus.weakness.id} (${c.probeFocus.reason})` : '—'} · ` +
+        `next to drill: ${c.drillFocus ? `#${c.drillFocus.weakness.id} (${c.drillFocus.reason})` : '—'}`,
+    );
   }
   L.push('');
 

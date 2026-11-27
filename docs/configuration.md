@@ -73,8 +73,16 @@ Set a goal with `prep set --target-date 2027-02-28` (or on the dashboard); `--ta
 | `tts` | `kokoro` | `kokoro` = local neural voice; `browser` = the browser's built-in voices only |
 | `ttsDtype` | `fp32` | Kokoro precision. fp32 is fastest on desktop CPUs (~3× realtime); `q8` is smaller but slower |
 | `claudeBin` | `claude` | path to the Claude Code executable (or set `PREP_CLAUDE_BIN`) |
+| `freshConversationAfterHours` | 4 | the voice tutor starts a fresh Claude conversation after this many idle hours (`/prep-start` always does); the old transcript is archived in `data/tutor/archive/`. Your progress lives in the database, so nothing is lost |
 
 Voice, speed and pause length are per-browser settings in the tutor panel (⚙), not in this file.
+
+## `drill` (the Drill page)
+| Key | Default | Meaning |
+|---|---|---|
+| `questions` | 5 | questions per drill (3–10) |
+| `generationModel` | `null` | model that writes the questions from your weakness and its noted slips (`null` = your Claude Code default). A set takes ~20–60 s, so the next drill is prepared in the background |
+| `gradingModel` | `haiku` | model that judges typed answers that don't match the expected answer exactly (a few seconds each) |
 
 ## `stt` (speech recognition in voice mode)
 | Key | Default | Meaning |

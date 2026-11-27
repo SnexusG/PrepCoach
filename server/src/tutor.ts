@@ -11,6 +11,10 @@ import type { TutorConfig } from '@prepcoach/core';
  * Claude Code is still the tutor — same CLAUDE.md, slash commands and `npx prep` state rules — the browser only
  * replaces the terminal with speech. One long-lived process per server; the session id is persisted so a
  * server restart resumes the same conversation.
+ *
+ * Conversations are per study session: `/prep-start` (or a long idle gap) starts a fresh Claude conversation and
+ * archives the old transcript — all durable state is in the database, which the tutor reloads with `prep context`.
+ * Transcript entries are tagged with the problem they belong to (`scope`), so the UI shows one problem's chat.
  */
 
 export type TutorState = 'stopped' | 'starting' | 'idle' | 'thinking';
@@ -25,6 +29,8 @@ export interface TranscriptEntry {
   /** tutor entries: still streaming. */
   streaming?: boolean;
   interrupted?: boolean;
+  /** The problem this message belongs to (slug), or null for session-level chat. */
+  scope?: string | null;
 }
 
 export type TutorEvent =
@@ -34,7 +40,13 @@ export type TutorEvent =
   | { type: 'entry_end'; id: string; interrupted?: boolean }
   | { type: 'turn_end' }
   | { type: 'navigate'; slug: string }
+  | { type: 'scope'; scope: string | null; title: string | null }
   | { type: 'reset' };
+
+export interface TutorBridgeOptions {
+  /** Problem title for a slug (for the "Chat for …" label). */
+  titleOf?: (slug: string) => string | null;
+}
 
 const VOICE_PROMPT = (refDir: string) => `
 # VOICE MODE (PrepCoach web app)
@@ -66,27 +78,45 @@ export class TutorBridge extends EventEmitter {
   private pendingStarts = new Map<string, string>(); // tool_use id -> slug for `npx prep start <slug>`
   private phase: 'text' | 'tools' | null = null;
   private resumeFailed = false;
+  /** Problem the conversation is currently about (set when the tutor runs `npx prep start <slug>`). */
+  private scope: string | null = null;
   state: TutorState = 'stopped';
 
   constructor(
     private cfg: TutorConfig,
     private cwd: string,
     private dataDir: string,
+    private opts: TutorBridgeOptions = {},
   ) {
     super();
     fs.mkdirSync(dataDir, { recursive: true });
     this.sessionId = this.readJson<{ sessionId: string }>('session.json')?.sessionId ?? null;
     this.entries = this.readTranscript();
+    this.scope = this.readJson<{ scope: string | null }>('scope.json')?.scope ?? null;
+  }
+
+  private scopeTitle(): string | null {
+    if (!this.scope) return null;
+    try {
+      return this.opts.titleOf?.(this.scope) ?? this.scope;
+    } catch {
+      return this.scope;
+    }
   }
 
   snapshot() {
-    return { state: this.state, entries: this.entries, sessionId: this.sessionId };
+    return { state: this.state, entries: this.entries, sessionId: this.sessionId, scope: this.scope, scopeTitle: this.scopeTitle() };
   }
 
   /** Send a user turn. If the tutor is mid-reply in text (not mid-tool), interrupt it first, like a real call. */
   send(text: string, clientId?: string) {
     const t = text.trim();
     if (!t) return;
+    const last = this.entries.length ? Date.parse(this.entries[this.entries.length - 1].at) : null;
+    const idleHours = last ? (Date.now() - last) / 36e5 : 0;
+    if (this.state !== 'thinking' && (/^\/prep-start\b/.test(t) || idleHours > this.cfg.freshConversationAfterHours)) {
+      this.freshConversation(/^\/prep-start\b/.test(t) ? 'new session' : `idle for ${Math.round(idleHours)} h`);
+    }
     if (this.state === 'thinking' && this.phase === 'text') this.interrupt();
     this.ensureStarted();
     this.addEntry({ id: randomUUID(), role: 'user', text: t, at: new Date().toISOString(), clientId });
@@ -99,6 +129,42 @@ export class TutorBridge extends EventEmitter {
     if (!this.proc || this.state !== 'thinking') return;
     this.write({ type: 'control_request', request_id: randomUUID(), request: { subtype: 'interrupt' } });
     this.endCurrent(true);
+  }
+
+  /**
+   * Start a new Claude conversation: the old transcript is archived (data/tutor/archive/) and the chat starts empty.
+   * A new study session also clears the problem scope; an idle-gap restart keeps it (the problem may still be open).
+   */
+  private freshConversation(reason: string) {
+    if (!this.sessionId && !this.entries.length) return;
+    this.kill();
+    this.sessionId = null;
+    this.resumeFailed = false;
+    this.current = null;
+    fs.rmSync(path.join(this.dataDir, 'session.json'), { force: true });
+    const f = path.join(this.dataDir, 'transcript.jsonl');
+    if (fs.existsSync(f)) {
+      const archive = path.join(this.dataDir, 'archive');
+      fs.mkdirSync(archive, { recursive: true });
+      fs.renameSync(f, path.join(archive, `transcript-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`));
+    }
+    this.entries = [];
+    this.emitEvent({ type: 'reset' });
+    if (reason === 'new session') this.setScope(null);
+    this.addEntry({ id: randomUUID(), role: 'activity', text: `new conversation (${reason}); the previous one is archived`, at: new Date().toISOString() });
+    this.setState('stopped');
+  }
+
+  /** On first run (no saved scope yet), take the problem that's currently open as the chat's problem. */
+  adoptScope(slug: string | null) {
+    if (!fs.existsSync(path.join(this.dataDir, 'scope.json')) && slug) this.setScope(slug);
+  }
+
+  private setScope(scope: string | null) {
+    if (this.scope === scope) return;
+    this.scope = scope;
+    this.writeJson('scope.json', { scope });
+    this.emitEvent({ type: 'scope', scope, title: this.scopeTitle() });
   }
 
   /** Forget the conversation and start a fresh Claude Code session on the next message. */
@@ -238,7 +304,10 @@ export class TutorBridge extends EventEmitter {
           if (c.type === 'tool_result' && this.pendingStarts.has(c.tool_use_id)) {
             const slug = this.pendingStarts.get(c.tool_use_id)!;
             this.pendingStarts.delete(c.tool_use_id);
-            if (!c.is_error) this.emitEvent({ type: 'navigate', slug });
+            if (!c.is_error) {
+              this.setScope(slug); // from here on, the chat is about this problem
+              this.emitEvent({ type: 'navigate', slug });
+            }
           }
         }
         break;
@@ -269,6 +338,7 @@ export class TutorBridge extends EventEmitter {
   }
 
   private addEntry(e: TranscriptEntry, persist = true) {
+    if (e.scope === undefined) e.scope = this.scope;
     this.entries.push(e);
     if (this.entries.length > MAX_ENTRIES) this.entries.splice(0, this.entries.length - MAX_ENTRIES);
     if (persist) this.persist(e);

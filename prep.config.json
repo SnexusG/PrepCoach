@@ -86,7 +86,13 @@
     "permissionMode": "auto",
     "allowedTools": ["Bash(npx prep:*)", "Read", "Glob", "Grep", "Edit(problems/**)", "Write(problems/**)"],
     "tts": "kokoro",
-    "ttsDtype": "fp32"
+    "ttsDtype": "fp32",
+    "freshConversationAfterHours": 4
+  },
+  "drill": {
+    "questions": 5,
+    "generationModel": null,
+    "gradingModel": "haiku"
   },
   "stt": {
     "engine": "whisper",

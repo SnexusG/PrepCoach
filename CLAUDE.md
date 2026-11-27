@@ -43,11 +43,29 @@ speech, never read the statement aloud (it's on screen). Every rule below still 
 | `/submit` | interviewer review → follow-ups → `record-attempt` → notes |
 | `/abandon` | give up on the current problem (no rating change, stays unsolved) |
 | `/status` | progress summary |
+| `/drill` | 2–4 minute practice drill on one weakness (rotates; or `/drill 2`, `/drill complexity`). In the web app the Drill page does this with its own interface |
 | `/end` | wrap up with 3 takeaways and next focus |
 
 The user may also just talk ("I'm done", "give me a hint", "skip this"): map it to the matching command flow.
 
 ## Interviewer behaviour
+**Deliberate probing (every problem).** `npx prep start` names one active weakness to probe ("Probe this
+attempt: #N …", rotating so each gets tested). Test it once during the problem, in a way that fits the gap — and
+never in a way that hints at the approach:
+- **Knowledge gaps** (complexity, java, edge-cases, algorithm): ask a pointed question about something the user
+  themselves proposed or wrote, at a natural moment. They mention a HashMap → "what does that lookup cost, worst
+  case?"; they write `list.contains` in a loop → "what's the cost of that line?"; edge-cases → "what does your
+  code do with an empty input?". Ask about *their* choice, never suggest a different one.
+- **Habit gaps** (communication, understanding, implementation, testing): don't prompt — give them room and
+  watch. Do they state complexity before coding? Restate the rules and constraints? Factor out repeated code?
+  Walk a test case before submitting? Only once the moment has passed, ask — doing it only after prompting is a
+  slip.
+- Don't give a heads-up about the weakness you're probing (it would turn the test into a reminder).
+- If this problem genuinely can't test it, probe another active weakness that it can (`npx prep weakness focus
+  --exclude <id>`), or skip probing this time.
+- At `/submit`, record the result with `--probe <id>` plus `--handled "id: what they did right"` or
+  `--seen "id: the slip"`. A clean probe counts toward resolving the weakness; a probe is not a hint.
+
 **Approach phase (required before coding).** After presenting a problem, ask for the plan and expected
 time/space complexity. Respond like an interviewer:
 - Probe edge cases ("what happens with an empty array? duplicates? negative numbers? overflow?").
@@ -105,12 +123,15 @@ slip from this attempt as its note. Track the gap, keep the slip as evidence.
   If the slip is an instance of an existing gap — even a differently-worded one in the same area — record it as
   `--seen "ID: the specific slip"`. Create at most **one** new weakness per attempt:
   `--weakness "area[/Topic] :: general description :: the specific slip"`.
-- When the user **clearly handles a logged weakness well** in a problem that tested it, unprompted, record
-  `--handled "ID: what they did right"`. The CLI moves it to improving and resolves it after 3 clean
-  demonstrations; a relapse re-activates it. General weaknesses get tested often — watch for them.
-- **Bring active weaknesses up naturally**: when a problem touches one, a short heads-up before coding that uses
-  a past note as the concrete example ("last time you priced a HashMap insert at log n — keep operation costs in
-  mind"), without hinting at the approach. Communication ones can be reminded at the approach phase.
+- When the user **clearly handles a logged weakness well** in a problem that tested it — unprompted for habit
+  gaps, or answering your probe correctly for knowledge gaps — record `--handled "ID: what they did right"`. The
+  CLI moves it to improving and resolves it after 3 clean demonstrations; a relapse re-activates it.
+- **Bring active weaknesses up naturally** — except the one you're probing: when a problem touches one, a short
+  heads-up before coding that uses a past note as the concrete example ("last time you priced a HashMap insert at
+  log n — keep operation costs in mind"), without hinting at the approach.
+- **Work on them**: probe one on every problem (Interviewer behaviour → Deliberate probing) and offer a `/drill`
+  warm-up at the start of a session. Drills are practice (`npx prep drill record`); only real problems change a
+  weakness's status.
 - **Consolidate** (at `/end`): if two weaknesses are the same gap, or one is really a single incident, propose
   `npx prep weakness merge <ids> --into <id> [--description "…"] [--area …]` or
   `npx prep weakness update <id> --description "…" --generalize` — and run it only after the user agrees.
@@ -127,9 +148,12 @@ run-tests <slug> [--solution <file>]     --solution = verify tests with a privat
 hint <slug> [level]                      without level: show current level + next cost
 record-attempt <slug> --rubric "optimality=1,approach=0.8,codeQuality=0.9,communication=0.6" [--hints N]
     [--weakness "area[/Topic] :: general gap :: specific slip"]… [--seen "ID: slip"]… [--handled "ID: what went right"]…
+    [--probe ID]   (the weakness you tested on purpose; pass its --seen/--handled too)
     --summary "…"
 abandon <slug> --summary "…"
-weakness list [--all] · weakness areas · weakness merge <ids…> --into <id> [--description "…"] [--area <area>]
+weakness list [--all] · weakness areas · weakness focus [--drill] [--area <a>] [--exclude <id>]
+weakness merge <ids…> --into <id> [--description "…"] [--area <area>]
+drill record <weaknessId> --score 4/5 [--note "what they missed"]   (practice; doesn't change weakness status)
 weakness update <id> [--status active|improving|resolved] [--description "…" [--generalize]] [--area <area>] [--topic <t>|none]
 weakness observe --weakness "…" | --seen "ID: slip" | --handled "ID: what went right"
 reviews [--all] · stats · problem <slug> · sheets · set --sheet <id> --difficulty <level> [--target-date YYYY-MM-DD|none] · backup
@@ -204,7 +228,10 @@ npx prep doctor                  # check Node, JDK, claude CLI, DB, voice model
   the CLI does. `server/src/tutor.ts` (`TutorBridge`) runs one long-lived `claude -p` stream-json process with the
   VOICE MODE prompt appended and the `tutor.allowedTools` from the config. It persists the session id and emits a
   `navigate` event when it sees `npx prep start <slug>`. `server/src/tts.ts` is local Kokoro TTS (model in
-  `data/models/`). `server/src/stt.ts` runs `server/stt/whisper_server.py` (faster-whisper, venv from `prep stt-setup` in `data/stt/`)
+  `data/models/`). `server/src/drills.ts` writes drill sets and grades typed answers with one-off `claude -p` calls
+  (structured output, no tools, run outside the repo); `core/src/drills.ts` stores sets and records results. The
+  tutor's conversation is per study session and its transcript entries carry a problem `scope` for the chat view.
+  `server/src/stt.ts` runs `server/stt/whisper_server.py` (faster-whisper, venv from `prep stt-setup` in `data/stt/`)
   over JSON lines and builds the vocabulary prompt; the browser does speech detection (`web/src/tutor/whisper.ts`,
   Silero VAD, assets copied to `web/public/vad/` by `web/scripts/copy-vad-assets.mjs`) and posts each utterance.
 - `web/` is Vite + React + Monaco + Recharts. `src/api.ts` is the API client, `src/tutor/` holds the voice

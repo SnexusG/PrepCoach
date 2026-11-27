@@ -34,7 +34,6 @@ const stat = (topic: string, rating = 1200, attempts = 0, recentOutcomes: TopicS
 const base = (over: Partial<SelectionInput> = {}): SelectionInput => ({
   problems,
   topicStats: ['Arrays & Hashing', 'Two Pointers', 'Sliding Window', 'Graphs'].map((t) => stat(t)),
-  activeWeaknesses: [],
   dueReviews: [],
   reviewsServedThisSession: 0,
   excludeSlugs: [],
@@ -57,21 +56,6 @@ describe('selectNext', () => {
     expect(second.kind).not.toBe('review');
     const more = selectNext(base({ ...due, reviewsServedThisSession: 1, extraReviews: true }), cfg)!;
     expect(more.kind).toBe('review');
-  });
-
-  it('targets a topic-specific active weakness, most observed first', () => {
-    const s = selectNext(
-      base({
-        activeWeaknesses: [
-          { id: 1, topic: 'Two Pointers', description: 'skips duplicates wrong', timesObserved: 1, lastSeen: '2026-11-01' },
-          { id: 2, topic: 'Graphs', description: 'forgets visited set in BFS', timesObserved: 3, lastSeen: '2026-10-01' },
-          { id: 3, topic: null, description: "doesn't state complexity", timesObserved: 9, lastSeen: '2026-11-07' },
-        ],
-      }),
-      cfg,
-    )!;
-    expect(s).toMatchObject({ slug: 'number-of-islands', kind: 'weakness' });
-    expect(s.reason).toContain('forgets visited set');
   });
 
   it('targets the lowest-rated attempted topic when it is clearly weak', () => {

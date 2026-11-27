@@ -15,6 +15,8 @@ export interface TranscriptEntry {
   clientId?: string;
   streaming?: boolean;
   interrupted?: boolean;
+  /** Problem this message belongs to (slug); null = session-level chat. */
+  scope?: string | null;
 }
 
 export interface VoiceSettings {
@@ -53,6 +55,9 @@ interface TutorApi {
   voiceError: string | null;
   /** Increments after every completed tutor turn — pages refetch on it (an attempt may have been recorded). */
   turns: number;
+  /** The problem the conversation is about now, and its title (null = no problem yet this session). */
+  scope: string | null;
+  scopeTitle: string | null;
   settings: VoiceSettings;
   /** The local Whisper helper's state (null until fetched / when the server is down). */
   sttStatus: SttStatus | null;
@@ -111,6 +116,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
   const [micError, setMicError] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [turns, setTurns] = useState(0);
+  const [scope, setScope] = useState<{ scope: string | null; title: string | null }>({ scope: null, title: null });
   const [settings, setSettings] = useState<VoiceSettings>(loadSettings);
 
   const navigate = useNavigate();
@@ -244,6 +250,7 @@ export function TutorProvider({ children }: { children: ReactNode }) {
       switch (e.type) {
         case 'snapshot':
           setEntries(e.entries);
+          setScope({ scope: e.scope ?? null, title: e.scopeTitle ?? null });
           setState(e.state);
           break;
         case 'state':
@@ -277,6 +284,9 @@ export function TutorProvider({ children }: { children: ReactNode }) {
         case 'turn_end':
           setTurns((n) => n + 1);
           break;
+        case 'scope':
+          setScope({ scope: e.scope ?? null, title: e.title ?? null });
+          break;
         case 'navigate':
           if (locationRef.current !== `/problem/${e.slug}`) navigate(`/problem/${e.slug}`);
           break;
@@ -295,6 +305,8 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     micError,
     voiceError,
     turns,
+    scope: scope.scope,
+    scopeTitle: scope.title,
     settings,
     sttStatus,
     sttInUse,

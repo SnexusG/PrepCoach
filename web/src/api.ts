@@ -168,7 +168,11 @@ export interface Weakness {
   timesObserved: number;
   cleanDemonstrations: number;
   lastSeen: string;
-  examples: { attemptId: number; slug: string; kind: string; date: string; summary: string | null; note: string | null }[];
+  examples: { attemptId: number; slug: string; kind: string; date: string; summary: string | null; note: string | null; probed: boolean }[];
+  /** Latest drills first. */
+  drills: { id: number; at: string; correct: number; total: number; note: string | null }[];
+  lastProbedAt: string | null;
+  lastDrillAt: string | null;
 }
 
 export interface ReviewItem {
@@ -270,3 +274,50 @@ export function forecastHeadline(f: Forecast, sheetName: string): string {
   }
 }
 export const fmtDelta = (d: number | null) => (d == null ? '—' : `${d >= 0 ? '+' : '−'}${Math.abs(Math.round(d * 10) / 10)}`);
+
+// ---------------- drills ----------------
+
+export type DrillQuestion =
+  | { type: 'mcq'; prompt: string; code?: string; options: string[]; answer?: number; explanation?: string }
+  | { type: 'short'; prompt: string; code?: string; expected?: string; explanation?: string }
+  | { type: 'bug'; prompt: string; code: string; answer?: number; explanation?: string }
+  | { type: 'fix'; prompt: string; code: string; expected?: string; explanation?: string };
+
+export interface DrillAnswer {
+  answer: number | string;
+  correct: boolean;
+  feedback: string;
+  gradedBy: 'auto' | 'claude';
+}
+
+export interface DrillSet {
+  id: number;
+  weaknessId: number;
+  status: 'ready' | 'in_progress' | 'done';
+  /** Unanswered questions come without their answer and explanation. */
+  questions: DrillQuestion[];
+  answers: Record<number, DrillAnswer>;
+}
+
+export interface DrillTarget {
+  id: number;
+  area: string | null;
+  description: string;
+  status: 'active' | 'improving' | 'resolved';
+  timesObserved: number;
+  lastDrill: { correct: number; total: number; at: string; note: string | null } | null;
+  ready: boolean;
+  generating: boolean;
+  error: string | null;
+}
+
+export const drillApi = {
+  list: () => call<{ suggested: number | null; weaknesses: DrillTarget[] }>('/api/drills'),
+  start: (weaknessId: number) => call<DrillSet>('/api/drills/start', { method: 'POST', body: JSON.stringify({ weaknessId }) }),
+  answer: (id: number, index: number, answer: number | string) =>
+    call<{ result: DrillAnswer; question: DrillQuestion; set: DrillSet }>(`/api/drills/${id}/answer`, {
+      method: 'POST',
+      body: JSON.stringify({ index, answer }),
+    }),
+  finish: (id: number) => call<{ drill: { correct: number; total: number; note: string | null } }>(`/api/drills/${id}/finish`, { method: 'POST' }),
+};

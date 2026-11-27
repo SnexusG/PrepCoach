@@ -54,6 +54,8 @@ voice input falls back to Chrome/Edge's built-in recognition. See `stt` in `docs
 3. Talk through your approach and its complexity. The tutor probes edge cases and asks "can you do better?",
    without giving the answer away.
 4. Code in the editor (it autosaves to `problems/<slug>/Solution.java`). **Run tests** with Ctrl+Enter.
+   Between problems, the **Drill** page gives you 5 quick questions (multiple choice, typed answers,
+   spot-the-bug) aimed at one of your weaknesses, generated from your actual slips.
 5. Say *"I'm done"* or press **Submit** to get the interviewer review. Your rating, weaknesses and review queue
    update and the dashboard reflects them right away.
 
@@ -98,8 +100,11 @@ Run `claude` in the repo and use the same slash commands. The web editor and das
   Secondary topics move at half weight and reviews at reduced weight.
 - **Overall.** The overall DSA rating is a weighted average of topic ratings, weighted by interview frequency
   and by confidence (how many attempts back it up).
-- **Reviews.** Solved problems are scheduled for spaced-repetition review, and weaknesses resolve after
-  repeated clean demonstrations.
+- **Reviews.** Only problems you struggled with (failed tests, a pattern hint or more, heavy steering) are
+  scheduled for spaced-repetition review; a clean review takes them off the list.
+- **Weaknesses.** General skill gaps (e.g. "not comfortable with the cost of Java collection operations"), each
+  with the specific slips as evidence. The tutor probes one active weakness per problem and runs short `/drill`
+  warm-ups on them; a weakness resolves after repeated clean demonstrations on real problems.
 
 Every constant is in [`prep.config.json`](prep.config.json). See [docs/configuration.md](docs/configuration.md).
 

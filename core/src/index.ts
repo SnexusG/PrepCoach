@@ -8,6 +8,7 @@ export * from './attempts';
 export * from './activity';
 export * from './forecast';
 export * from './sttHelper';
+export * from './drills';
 export * from './catalog';
 export * from './sessions';
 export * from './queries';

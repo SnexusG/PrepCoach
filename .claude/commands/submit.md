@@ -23,7 +23,9 @@ Review and record the user's solution. Arguments: `$ARGUMENTS`
    `--seen "ID: the specific slip"` for an instance of an existing gap, `--handled "ID: what they did right"`
    for one this problem tested that they handled cleanly unprompted, and at most one
    `--weakness "area[/Topic] :: general gap :: the specific slip"` for a gap nobody has logged yet. Then run:
-   `npx prep record-attempt <slug> --rubric "optimality=…,approach=…,codeQuality=…,communication=…" [--seen "ID: …"] [--handled "ID: …"] [--weakness "…"] --summary "<1–2 sentences: approach, outcome, key mistake>"`
+   If you probed a weakness this attempt, add `--probe <id>` with its `--handled` or `--seen` (an unanswered or
+   untested probe: leave it out). Then run:
+   `npx prep record-attempt <slug> --rubric "optimality=…,approach=…,codeQuality=…,communication=…" [--probe ID] [--seen "ID: …"] [--handled "ID: …"] [--weakness "…"] --summary "<1–2 sentences: approach, outcome, key mistake>"`
    (hints are taken from the log automatically).
 5. **Report the rating change in one line** using the CLI's numbers (e.g. "Linked List 1236 → 1251 (+15), review Nov 15
    since you needed the pattern hint"). Only struggles are reviewed: say "no review needed" for a clean solve, and

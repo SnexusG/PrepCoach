@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useNavigate } from 'react-router-dom';
 import { englishVoices } from '../tutor/speech';
 import { useTutor, type TranscriptEntry } from '../tutor/TutorContext';
 
-const ACTIONS: { label: string; cmd: string; title: string }[] = [
+const ACTIONS: { label: string; cmd: string; title: string; href?: string }[] = [
   { label: 'Start session', cmd: '/prep-start', title: 'Status and confirm sheet + difficulty' },
   { label: 'Next problem', cmd: '/next', title: 'Serve the next problem' },
   { label: 'Hint', cmd: '/hint', title: 'Tiered hint — cost is announced first' },
   { label: 'Submit', cmd: '/submit', title: 'Interviewer review and record the attempt' },
+  { label: 'Drill', cmd: '/drill', href: '/drill', title: 'Open the drill page: quick questions on one of your weaknesses' },
   { label: 'End', cmd: '/end', title: 'Wrap up with takeaways' },
 ];
 
@@ -32,16 +34,17 @@ const FENCE = /```[^\n]*\n[\s\S]*?(?:```|$)/g;
  */
 function VoiceView({ onExpand }: { onExpand: () => void }) {
   const t = useTutor();
+  const entries = t.entries.filter((e) => (e.scope ?? null) === t.scope);
   const lastIdx = (pred: (e: TranscriptEntry) => boolean) => {
-    for (let i = t.entries.length - 1; i >= 0; i--) if (pred(t.entries[i])) return i;
+    for (let i = entries.length - 1; i >= 0; i--) if (pred(entries[i])) return i;
     return -1;
   };
   const iUser = lastIdx((e) => e.role === 'user');
   const iTutor = lastIdx((e) => e.role === 'tutor');
   const iError = lastIdx((e) => e.role === 'error');
 
-  const caption = t.interim || (iUser > iTutor ? t.entries[iUser].text : '');
-  const shown = iTutor >= 0 ? (t.entries[iTutor].text.match(FENCE) ?? []).join('\n\n') : '';
+  const caption = t.interim || (iUser > iTutor ? entries[iUser].text : '');
+  const shown = iTutor >= 0 ? (entries[iTutor].text.match(FENCE) ?? []).join('\n\n') : '';
 
   return (
     <div className="t-voice">
@@ -51,7 +54,7 @@ function VoiceView({ onExpand }: { onExpand: () => void }) {
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{shown}</ReactMarkdown>
         </div>
       )}
-      {iError > iTutor && <div className="t-error">{t.entries[iError].text}</div>}
+      {iError > iTutor && <div className="t-error">{entries[iError].text}</div>}
       <button className="t-expand" onClick={onExpand}>
         Transcript hidden while talking. Show chat
       </button>
@@ -191,9 +194,16 @@ function Settings({ onClose }: { onClose: () => void }) {
 
 export default function TutorPanel() {
   const t = useTutor();
+  const navigate = useNavigate();
   const [draft, setDraft] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const [showEarlier, setShowEarlier] = useState(false);
+  const inScope = (e: TranscriptEntry) => (e.scope ?? null) === t.scope;
+  const firstInScope = t.entries.findIndex(inScope);
+  const earlierCount = firstInScope < 0 ? t.entries.length : firstInScope;
+  const visible = showEarlier ? t.entries : t.entries.filter(inScope);
+  useEffect(() => setShowEarlier(false), [t.scope]);
 
   // Keep the newest message in view.
   useEffect(() => {
@@ -252,6 +262,21 @@ export default function TutorPanel() {
       {t.micError && <div className="t-error">{t.micError}</div>}
       {t.voiceError && <div className="t-error">{t.voiceError}</div>}
 
+      <div className={`t-scope ${t.scope ? 'problem' : ''}`} title="The chat shows the current problem's conversation">
+        {t.scope ? (
+          <>
+            📌 Chat for <b>{t.scopeTitle ?? t.scope}</b>
+          </>
+        ) : (
+          <>💬 Session chat — no problem started yet</>
+        )}
+        {!collapsed && earlierCount > 0 && (
+          <button className="link-btn" onClick={() => setShowEarlier((v) => !v)}>
+            {showEarlier ? 'hide earlier' : `show earlier (${earlierCount})`}
+          </button>
+        )}
+      </div>
+
       {collapsed ? (
         <VoiceView onExpand={() => t.updateSettings({ chatInVoice: true })} />
       ) : (
@@ -262,8 +287,14 @@ export default function TutorPanel() {
             {!t.recognitionSupported && <div>Voice input needs Chrome or Edge — you can still type.</div>}
           </div>
         )}
-        {t.entries.map((e) => (
-          <Entry key={e.id} e={e} />
+        {t.entries.length > 0 && visible.length === 0 && <div className="t-empty">No messages for this problem yet.</div>}
+        {visible.map((e, i) => (
+          <Fragment key={e.id}>
+            {showEarlier && i === earlierCount && earlierCount > 0 && (
+              <div className="t-divider">{t.scope ? `— ${t.scopeTitle ?? t.scope} —` : '— this session —'}</div>
+            )}
+            <Entry e={e} />
+          </Fragment>
         ))}
         {t.interim && <div className="t-msg user interim">{t.interim}</div>}
       </div>
@@ -271,7 +302,7 @@ export default function TutorPanel() {
 
       <div className="t-actions">
         {ACTIONS.map((a) => (
-          <button key={a.cmd} className="small-btn" title={a.title} onClick={() => t.send(a.cmd)}>
+          <button key={a.cmd} className="small-btn" title={a.title} onClick={() => (a.href ? navigate(a.href) : t.send(a.cmd))}>
             {a.label}
           </button>
         ))}

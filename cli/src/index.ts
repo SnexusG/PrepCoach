@@ -51,6 +51,8 @@ import {
   updateWeakness,
   weaknessesWithExamples,
   mergeWeaknesses,
+  focusWeakness,
+  recordDrill,
   parseArea,
   WEAKNESS_AREAS,
   applyWeaknessObservations,
@@ -110,7 +112,7 @@ const collect = (v: string, prev: string[]) => [...prev, v];
  *   --weakness "area[/Topic] :: general description [:: the specific slip]"   (old style "Topic :: description" still works)
  *   --seen "ID[: the specific slip]"   --handled "ID[: what they did right]"
  */
-function weaknessObservations(o: { weaknesses?: string; weakness?: string[]; seen?: string[]; handled?: string[] }): WeaknessObservation[] {
+function weaknessObservations(o: { weaknesses?: string; weakness?: string[]; seen?: string[]; handled?: string[]; probe?: string[] }): WeaknessObservation[] {
   const obs: WeaknessObservation[] = [];
   if (o.weaknesses) {
     const parsed = parseObjectArg(o.weaknesses, '--weaknesses');
@@ -135,6 +137,12 @@ function weaknessObservations(o: { weaknesses?: string; weakness?: string[]; see
   };
   for (const v of o.seen ?? []) obs.push({ ...idNote(v, '--seen'), kind: 'observed' });
   for (const v of o.handled ?? []) obs.push({ ...idNote(v, '--handled'), kind: 'handled_well' });
+  for (const v of o.probe ?? []) {
+    const id = Number(String(v).replace(/^#/, ''));
+    const hit = obs.find((x) => x.id === id);
+    if (!hit) throw new Error(`--probe ${v} needs the outcome too: --handled "${id}: …" or --seen "${id}: …"`);
+    hit.probed = true;
+  }
   return obs;
 }
 
@@ -244,11 +252,16 @@ program
     const { attempt, resumed } = startAttempt(d, slug, { isReview });
     const problem = getProblem(d, slug);
     const files = problemFiles(slug);
-    out({ attempt, resumed, problem, files, editorUrl: editorUrl(slug) }, () => [
+    const probe = focusWeakness(d, problem.track, 'probe');
+    out({ attempt, resumed, problem, files, editorUrl: editorUrl(slug), probe }, () => [
       `${resumed ? 'Resumed' : 'Started'} attempt #${attempt.id}: ${problem.title} (${problem.topic}, ${problem.difficulty}, rating ${problem.difficultyRating})${attempt.isReview ? ' — REVIEW' : ''}`,
       `Timer started at ${attempt.startedAt.slice(11, 19)} UTC · hints used ${attempt.hintsUsed}`,
       `Editor: ${editorUrl(slug)}`,
       `Files: ${rel(files.dir)} — ${files.generated ? 'generated' : 'NOT generated yet: write Problem.md, Solution.java, tests.json'}`,
+      probe
+        ? `Probe this attempt: #${probe.weakness.id} [${probe.weakness.area ?? 'no area'}] ${probe.weakness.description} (${probe.reason}) — ` +
+          'if this problem can\'t test it, pick another active weakness it can, or skip'
+        : 'Probe this attempt: no active weaknesses',
     ]);
   });
 
@@ -320,6 +333,7 @@ program
   .option('--weakness <"area[/Topic] :: general description :: specific slip">', 'new general weakness, with this attempt\'s slip as the note (repeatable)', collect, [])
   .option('--seen <"ID: slip">', 'existing weakness observed again, with what happened (repeatable)', collect, [])
   .option('--handled <"ID: what went right">', 'existing weakness handled well this time (repeatable)', collect, [])
+  .option('--probe <id>', 'the weakness you tested on purpose this attempt (also pass its --handled or --seen)', collect, [])
   .option('--summary <text>', 'one-paragraph tutor summary')
   .option('--tests-passed <n>', 'override tests passed (defaults to latest run)', Number)
   .option('--tests-total <n>', 'override tests total (defaults to latest run)', Number)
@@ -423,6 +437,23 @@ weakness
     out(w, () => `Merged into #${w.id} [${w.area ?? 'no area'}] ${w.description} — ${w.status}, seen ${w.timesObserved}×`);
   });
 weakness
+  .command('focus')
+  .description('which weakness to work on next (rotates so each gets attention)')
+  .option('--drill', 'for a drill instead of probing on a problem')
+  .option('--area <area>', 'only weaknesses in this area')
+  .option('--exclude <id>', 'skip this weakness (repeatable)', collect, [])
+  .action((o) => {
+    const f = focusWeakness(db(), getPrefs(db()).track, o.drill ? 'drill' : 'probe', {
+      area: o.area ? requireArea(o.area) ?? undefined : undefined,
+      exclude: (o.exclude as string[]).map(Number),
+    });
+    out(f, () =>
+      f
+        ? `#${f.weakness.id} [${f.weakness.area ?? 'no area'}] ${f.weakness.description} — ${f.weakness.status}, seen ${f.weakness.timesObserved}× (${f.reason})`
+        : 'No active or improving weaknesses.',
+    );
+  });
+weakness
   .command('areas')
   .description('the areas a weakness can belong to')
   .action(() => out(WEAKNESS_AREAS, () => Object.entries(WEAKNESS_AREAS).map(([k, v]) => `${k.padEnd(15)} ${v}`)));
@@ -439,6 +470,26 @@ weakness
     const d = db();
     const changes = d.transaction(() => applyWeaknessObservations(d, cfg, getPrefs(d).track, null, obs))();
     out(changes, () => changes.map((w) => `#${w.id} "${w.description}": ${w.action} → ${w.status}`));
+  });
+
+// ---------------- drill ----------------
+const drill = program.command('drill').description('short practice drills on a weakness');
+drill
+  .command('record <weaknessId>')
+  .description('record a drill result (practice only: it does not change the weakness status)')
+  .requiredOption('--score <correct/total>', 'e.g. 4/5')
+  .option('--note <text>', 'what they missed (or "all correct")')
+  .action((id, o) => {
+    const m = /^(\d+)\s*\/\s*(\d+)$/.exec(String(o.score));
+    if (!m) throw new Error('--score must look like 4/5');
+    const d = db();
+    const r = recordDrill(d, Number(String(id).replace(/^#/, '')), {
+      correct: Number(m[1]),
+      total: Number(m[2]),
+      note: o.note,
+      sessionId: activeSession(d)?.id ?? null,
+    });
+    out(r, () => `Drill on #${r.weaknessId}: ${r.correct}/${r.total}${r.note ? ` — ${r.note}` : ''}`);
   });
 
 // ---------------- reviews ----------------

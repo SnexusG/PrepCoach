@@ -239,12 +239,15 @@ function Weaknesses({ data }: { data: DashData }) {
             <div className="muted small">
               seen {w.timesObserved}× · last {fmtDate(w.lastSeen)}
               {w.status === 'improving' && ` · ${w.cleanDemonstrations} clean`}
+              {w.drills[0] && ` · last drill ${w.drills[0].correct}/${w.drills[0].total} (${fmtDate(w.drills[0].at)})`}
+              {w.lastProbedAt ? ` · probed ${fmtDate(w.lastProbedAt)}` : ' · not probed yet'}
             </div>
             {w.examples.length > 0 && (
               <ul className="wexamples small">
                 {w.examples.slice(0, 2).map((e) => (
                   <li key={e.attemptId}>
-                    <span className={e.kind === 'observed' ? 'muted' : 'st solved'}>{e.kind === 'observed' ? 'e.g.' : '✓'}</span>{' '}
+                    <span className={e.kind === 'observed' ? 'muted' : 'st solved'}>{e.kind === 'observed' ? 'e.g.' : '✓'}</span>
+                    {e.probed && <span className="muted" title="Tested on purpose by the tutor"> (probed)</span>}{' '}
                     {e.note ?? e.summary ?? ''}{' '}
                     <Link to={`/history?attempt=${e.attemptId}`} className="muted">
                       ({e.slug})

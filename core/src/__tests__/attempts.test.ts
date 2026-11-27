@@ -13,7 +13,7 @@ import {
   startAttempt,
   topicRatings,
 } from '../attempts';
-import { getWeakness, listWeaknesses, mergeWeaknesses, updateWeakness } from '../weaknesses';
+import { focusWeakness, getWeakness, listDrills, listWeaknesses, mergeWeaknesses, recordDrill, updateWeakness } from '../weaknesses';
 import { weaknessesWithExamples } from '../queries';
 
 const cfg = loadConfig();
@@ -274,5 +274,53 @@ describe('general weaknesses with specific notes', () => {
     const w = updateWeakness(db, id, { description: 'not comfortable with Java operation costs', area: 'complexity', generalize: true });
     expect(w).toMatchObject({ description: 'not comfortable with Java operation costs', area: 'complexity' });
     expect(notes(id)).toEqual(['believes HashMap insertion is O(log n)']);
+  });
+});
+
+describe('deliberate probing and drills', () => {
+  const solve = (slug: string, weaknesses: any[], at = t1) => {
+    startAttempt(db, slug, { now: t0 });
+    recordTestRun(db, slug, 10, 10, at);
+    return recordAttempt(db, cfg, { slug, rubric: perfect, weaknesses, now: at });
+  };
+  const make = () => {
+    const a = solve('two-sum', [{ description: 'gap A', area: 'complexity' }, { description: 'gap B', area: 'java' }]);
+    return a.weaknesses.map((w) => w.id);
+  };
+
+  it('rotates the probe target: never-probed first, then the least recently probed', () => {
+    const [a, b] = make();
+    expect(focusWeakness(db, 'dsa', 'probe')!.reason).toBe('never probed');
+    solve('3sum', [{ id: a, kind: 'handled_well', note: 'priced TreeMap.put right', probed: true }]);
+    // a is improving and now probed; b was never probed, so it comes next
+    expect(focusWeakness(db, 'dsa', 'probe')!.weakness.id).toBe(b);
+    expect(focusWeakness(db, 'dsa', 'probe', { exclude: [b] })!).toMatchObject({ weakness: { id: a }, reason: expect.stringMatching(/^last probed /) });
+    expect(focusWeakness(db, 'dsa', 'probe', { area: 'complexity' })!.weakness.id).toBe(a);
+    const probed = db.prepare('SELECT probed FROM weakness_attempts WHERE weakness_id = ? AND kind = ?').get(a, 'handled_well');
+    expect(probed).toEqual({ probed: 1 });
+  });
+
+  it('records drills without changing the weakness status, and rotates drill targets', () => {
+    const [a, b] = make();
+    recordDrill(db, a, { correct: 3, total: 5, note: 'sorting cost' }, t1);
+    expect(getWeakness(db, a)).toMatchObject({ status: 'active', cleanDemonstrations: 0, lastDrillAt: t1.toISOString() });
+    expect(focusWeakness(db, 'dsa', 'drill')!.weakness.id).toBe(b);
+    expect(listDrills(db, a)).toMatchObject([{ correct: 3, total: 5, note: 'sorting cost' }]);
+    expect(() => recordDrill(db, a, { correct: 6, total: 5 })).toThrow(/score/);
+    expect(() => recordDrill(db, 999, { correct: 1, total: 1 })).toThrow(/not found/);
+  });
+
+  it('merging carries drills and probe flags to the target', () => {
+    const [a, b] = make();
+    recordDrill(db, b, { correct: 4, total: 5 }, t1);
+    solve('3sum', [{ id: b, note: 'containsKey slip', probed: true }]);
+    mergeWeaknesses(db, [b], a);
+    expect(listDrills(db, a)).toHaveLength(1);
+    expect(getWeakness(db, a)!.lastProbedAt).not.toBeNull();
+  });
+
+  it('returns nothing to focus on when no weakness is open', () => {
+    expect(focusWeakness(db, 'dsa', 'probe')).toBeNull();
+    expect(focusWeakness(db, 'dsa', 'drill')).toBeNull();
   });
 });

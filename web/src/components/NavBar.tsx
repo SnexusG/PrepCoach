@@ -8,6 +8,7 @@ export default function NavBar({ children }: { children?: ReactNode }) {
       <NavLink to="/" className="brand">PrepCoach</NavLink>
       <nav className="nav">
         <NavLink to="/" end>Home</NavLink>
+        <NavLink to="/drill">Drill</NavLink>
         <NavLink to="/dashboard">Dashboard</NavLink>
         <NavLink to="/history">History</NavLink>
       </nav>

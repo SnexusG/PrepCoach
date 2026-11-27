@@ -34,7 +34,7 @@ describe('catalog', () => {
 });
 
 describe('next + sessions', () => {
-  it('starts with the first medium, then targets a fresh weakness', () => {
+  it('starts with the first medium, and weaknesses do not steer problem choice', () => {
     startSession(db, 'dsa', now);
     expect(nextProblem(db, cfg, { now }).selection!.slug).toBe('group-anagrams');
     startAttempt(db, 'two-sum', { now });
@@ -46,7 +46,7 @@ describe('next + sessions', () => {
       now,
     });
     const n = nextProblem(db, cfg, { now });
-    expect(n.selection).toMatchObject({ slug: 'two-sum-ii-input-array-is-sorted', kind: 'weakness', topic: 'Two Pointers' });
+    expect(n.selection).toMatchObject({ slug: 'group-anagrams', kind: 'sheet' });
   });
 
   it('excludes problems abandoned this session, re-serves them in the next one', () => {

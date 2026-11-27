@@ -36,6 +36,8 @@ export interface WeaknessObservation {
   area?: WeaknessArea | null;
   /** The specific slip (or clean demonstration) in this attempt, e.g. "priced a HashMap insert at O(log n)". */
   note?: string | null;
+  /** The tutor tested this weakness on purpose (deliberate probing). */
+  probed?: boolean;
 }
 
 export interface WeaknessRow {
@@ -49,6 +51,10 @@ export interface WeaknessRow {
   firstSeen: string;
   lastSeen: string;
   status: WeaknessStatus;
+  /** When the tutor last probed it on purpose (null = never). */
+  lastProbedAt: string | null;
+  /** When it was last drilled (null = never). */
+  lastDrillAt: string | null;
 }
 
 export interface WeaknessChange {
@@ -63,7 +69,10 @@ export interface WeaknessChange {
 const SELECT = `
   SELECT w.id, w.track, t.name AS topic, w.area, w.description, w.times_observed AS timesObserved,
          w.clean_demonstrations AS cleanDemonstrations, w.first_seen AS firstSeen,
-         w.last_seen AS lastSeen, w.status
+         w.last_seen AS lastSeen, w.status,
+         (SELECT MAX(COALESCE(a.finished_at, a.started_at)) FROM weakness_attempts wa JOIN attempts a ON a.id = wa.attempt_id
+            WHERE wa.weakness_id = w.id AND wa.probed = 1) AS lastProbedAt,
+         (SELECT MAX(d.at) FROM weakness_drills d WHERE d.weakness_id = w.id) AS lastDrillAt
   FROM weaknesses w LEFT JOIN topics t ON t.id = w.topic_id`;
 
 export function listWeaknesses(db: DB, track: Track, statuses?: WeaknessStatus[]): WeaknessRow[] {
@@ -102,8 +111,9 @@ export function applyWeaknessObservations(
 ): WeaknessChange[] {
   const ts = now.toISOString();
   const link = db.prepare(
-    `INSERT INTO weakness_attempts (weakness_id, attempt_id, kind, note) VALUES (?, ?, ?, ?)
-     ON CONFLICT(weakness_id, attempt_id) DO UPDATE SET kind = excluded.kind, note = COALESCE(excluded.note, note)`,
+    `INSERT INTO weakness_attempts (weakness_id, attempt_id, kind, note, probed) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(weakness_id, attempt_id) DO UPDATE SET kind = excluded.kind, note = COALESCE(excluded.note, note),
+       probed = MAX(probed, excluded.probed)`,
   );
   const changes: WeaknessChange[] = [];
 
@@ -140,7 +150,7 @@ export function applyWeaknessObservations(
       db.prepare('UPDATE weaknesses SET clean_demonstrations = ?, status = ? WHERE id = ?').run(clean, status, id);
     }
 
-    if (attemptId != null) link.run(id, attemptId, kind, obs.note?.trim() || null);
+    if (attemptId != null) link.run(id, attemptId, kind, obs.note?.trim() || null, obs.probed ? 1 : 0);
     const w = getWeakness(db, id)!;
     changes.push({
       id,
@@ -211,25 +221,40 @@ export function mergeWeaknesses(
     if (opts.description && opts.description.trim() !== target.description) keepOldWordingAsNotes(db, targetId, target.description);
     for (const src of sources) {
       keepOldWordingAsNotes(db, src.id, src.description);
-      const links = db.prepare('SELECT attempt_id AS attemptId, kind, note FROM weakness_attempts WHERE weakness_id = ?').all(src.id) as {
+      const links = db.prepare('SELECT attempt_id AS attemptId, kind, note, probed FROM weakness_attempts WHERE weakness_id = ?').all(src.id) as {
         attemptId: number;
         kind: string;
         note: string | null;
+        probed: number;
       }[];
       for (const l of links) {
         const existing = db
-          .prepare('SELECT kind, note FROM weakness_attempts WHERE weakness_id = ? AND attempt_id = ?')
-          .get(targetId, l.attemptId) as { kind: string; note: string | null } | undefined;
+          .prepare('SELECT kind, note, probed FROM weakness_attempts WHERE weakness_id = ? AND attempt_id = ?')
+          .get(targetId, l.attemptId) as { kind: string; note: string | null; probed: number } | undefined;
         if (!existing) {
-          db.prepare('INSERT INTO weakness_attempts (weakness_id, attempt_id, kind, note) VALUES (?, ?, ?, ?)').run(targetId, l.attemptId, l.kind, l.note);
+          db.prepare('INSERT INTO weakness_attempts (weakness_id, attempt_id, kind, note, probed) VALUES (?, ?, ?, ?, ?)').run(
+            targetId,
+            l.attemptId,
+            l.kind,
+            l.note,
+            l.probed,
+          );
         } else {
           // Same attempt on both: an observed slip outweighs a clean demonstration; keep both notes.
           const kind = existing.kind === 'observed' || l.kind === 'observed' ? 'observed' : 'handled_well';
           const note = [existing.note, l.note].filter(Boolean).join('; ') || null;
-          db.prepare('UPDATE weakness_attempts SET kind = ?, note = ? WHERE weakness_id = ? AND attempt_id = ?').run(kind, note, targetId, l.attemptId);
+          db.prepare('UPDATE weakness_attempts SET kind = ?, note = ?, probed = ? WHERE weakness_id = ? AND attempt_id = ?').run(
+            kind,
+            note,
+            Math.max(existing.probed, l.probed),
+            targetId,
+            l.attemptId,
+          );
         }
       }
       db.prepare('DELETE FROM weakness_attempts WHERE weakness_id = ?').run(src.id);
+      db.prepare('UPDATE weakness_drills SET weakness_id = ? WHERE weakness_id = ?').run(targetId, src.id);
+      db.prepare('UPDATE drill_sets SET weakness_id = ? WHERE weakness_id = ?').run(targetId, src.id);
       db.prepare('DELETE FROM weaknesses WHERE id = ?').run(src.id);
     }
     const all = [target, ...sources];
@@ -250,4 +275,80 @@ export function mergeWeaknesses(
     );
   })();
   return getWeakness(db, targetId)!;
+}
+
+// ---------------------------------------------------------------- deliberate probing & drills
+
+export interface WeaknessFocus {
+  weakness: WeaknessRow;
+  /** Why this one, e.g. "never probed" or "last drilled Nov 20". */
+  reason: string;
+}
+
+const day = (iso: string) => iso.slice(0, 10);
+
+/**
+ * Which active/improving weakness to work on next, rotating so each gets attention:
+ * - probe: least recently probed first (never = first); ties go to improving ones (one clean demonstration closer
+ *   to resolving), then the most observed.
+ * - drill: least recently drilled first; ties go to active ones (drills are for open gaps), then the most observed.
+ */
+export function focusWeakness(
+  db: DB,
+  track: Track,
+  purpose: 'probe' | 'drill',
+  opts: { exclude?: number[]; area?: WeaknessArea } = {},
+): WeaknessFocus | null {
+  const candidates = listWeaknesses(db, track, ['active', 'improving']).filter(
+    (w) => !opts.exclude?.includes(w.id) && (!opts.area || w.area === opts.area),
+  );
+  if (!candidates.length) return null;
+  const last = (w: WeaknessRow) => (purpose === 'probe' ? w.lastProbedAt : w.lastDrillAt) ?? '';
+  const statusRank = (w: WeaknessRow) =>
+    purpose === 'probe' ? (w.status === 'improving' ? 0 : 1) : w.status === 'active' ? 0 : 1;
+  const [w] = [...candidates].sort(
+    (a, b) => last(a).localeCompare(last(b)) || statusRank(a) - statusRank(b) || b.timesObserved - a.timesObserved,
+  );
+  const when = last(w);
+  const verb = purpose === 'probe' ? 'probed' : 'drilled';
+  return { weakness: w, reason: when ? `last ${verb} ${day(when)}` : `never ${verb}` };
+}
+
+export interface DrillRow {
+  id: number;
+  weaknessId: number;
+  at: string;
+  correct: number;
+  total: number;
+  note: string | null;
+}
+
+/** Records a drill result. Drills are practice: they don't change the weakness status (real problems do). */
+export function recordDrill(
+  db: DB,
+  weaknessId: number,
+  result: { correct: number; total: number; note?: string | null; sessionId?: number | null },
+  now = new Date(),
+): DrillRow {
+  if (!getWeakness(db, weaknessId)) throw new Error(`Weakness #${weaknessId} not found`);
+  const { correct, total } = result;
+  if (!(Number.isInteger(total) && total >= 1 && Number.isInteger(correct) && correct >= 0 && correct <= total)) {
+    throw new Error(`Drill score must be correct/total with 0 <= correct <= total (got ${correct}/${total})`);
+  }
+  const id = Number(
+    db
+      .prepare('INSERT INTO weakness_drills (weakness_id, session_id, at, correct, total, note) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(weaknessId, result.sessionId ?? null, now.toISOString(), correct, total, result.note?.trim() || null).lastInsertRowid,
+  );
+  return db
+    .prepare('SELECT id, weakness_id AS weaknessId, at, correct, total, note FROM weakness_drills WHERE id = ?')
+    .get(id) as DrillRow;
+}
+
+export function listDrills(db: DB, weaknessId: number, limit = 3): DrillRow[] {
+  return db
+    .prepare(
+      'SELECT id, weakness_id AS weaknessId, at, correct, total, note FROM weakness_drills WHERE weakness_id = ? ORDER BY at DESC LIMIT ?',
+    )
+    .all(weaknessId, limit) as DrillRow[];
 }

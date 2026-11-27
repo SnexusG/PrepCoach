@@ -62,6 +62,23 @@ export interface PrepConfig {
   tutor?: Partial<TutorConfig>;
   /** Speech recognition for voice mode. Optional; defaults below. */
   stt?: Partial<SttConfig>;
+  /** Drill page (generated questions on a weakness). Optional; defaults below. */
+  drill?: Partial<DrillConfig>;
+}
+
+export interface DrillConfig {
+  /** Questions per drill. */
+  questions: number;
+  /** Model that writes drill questions (null = your Claude Code default). */
+  generationModel: string | null;
+  /** Model that grades typed answers (small and fast is fine). */
+  gradingModel: string | null;
+}
+
+export const DEFAULT_DRILL_CONFIG: DrillConfig = { questions: 5, generationModel: null, gradingModel: 'haiku' };
+
+export function drillConfig(cfg: PrepConfig): DrillConfig {
+  return { ...DEFAULT_DRILL_CONFIG, ...(cfg.drill ?? {}) };
 }
 
 export interface SttConfig {
@@ -132,6 +149,8 @@ export interface TutorConfig {
   tts: 'kokoro' | 'browser';
   /** Kokoro model precision; fp32 is fastest on desktop CPUs. */
   ttsDtype: 'fp32' | 'q8' | 'q4';
+  /** Start a fresh tutor conversation (old transcript archived) after this many idle hours; /prep-start always does. */
+  freshConversationAfterHours: number;
 }
 
 export const DEFAULT_TUTOR_CONFIG: TutorConfig = {
@@ -141,6 +160,7 @@ export const DEFAULT_TUTOR_CONFIG: TutorConfig = {
   allowedTools: ['Bash(npx prep:*)', 'Read', 'Glob', 'Grep', 'Edit(problems/**)', 'Write(problems/**)'],
   tts: 'kokoro',
   ttsDtype: 'fp32',
+  freshConversationAfterHours: 4,
 };
 
 export function tutorConfig(cfg: PrepConfig): TutorConfig {
@@ -209,6 +229,13 @@ export function validateConfig(cfg: PrepConfig): void {
   if (t.tts && !['kokoro', 'browser'].includes(t.tts)) errors.push('tutor.tts must be "kokoro" or "browser"');
   if (t.ttsDtype && !['fp32', 'q8', 'q4'].includes(t.ttsDtype)) errors.push('tutor.ttsDtype must be "fp32", "q8" or "q4"');
   if (t.allowedTools && !Array.isArray(t.allowedTools)) errors.push('tutor.allowedTools must be an array of permission rules');
+  if (t.freshConversationAfterHours !== undefined && !(t.freshConversationAfterHours > 0)) {
+    errors.push('tutor.freshConversationAfterHours must be > 0');
+  }
+  const dr = cfg.drill ?? {};
+  if (dr.questions !== undefined && !(Number.isInteger(dr.questions) && dr.questions >= 3 && dr.questions <= 10)) {
+    errors.push('drill.questions must be an integer 3–10');
+  }
   const s = cfg.stt ?? {};
   if (s.engine && !['whisper', 'browser'].includes(s.engine)) errors.push('stt.engine must be "whisper" or "browser"');
   if (s.device && !['auto', 'cuda', 'cpu'].includes(s.device)) errors.push('stt.device must be "auto", "cuda" or "cpu"');

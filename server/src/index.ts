@@ -23,11 +23,20 @@ import {
   readLastResults,
   runProblemTests,
   sttConfig,
+  drillConfig,
+  finishDrillSet,
+  getDrillSet,
+  gradeLocally,
+  publicDrillSet,
+  saveDrillAnswer,
+  focusWeakness,
+  getPrefs,
   tutorConfig,
   type AttemptRow,
 } from '@prepcoach/core';
 import { TutorBridge, type TutorEvent } from './tutor';
 import { buildPrompt, Stt } from './stt';
+import { DrillService } from './drills';
 import { Tts } from './tts';
 
 // The server only reads state and runs tests through the shared core library — the same code the CLI uses.
@@ -247,7 +256,13 @@ app.get('/api/attempts/:id', (req, res) => {
 });
 
 // ---------------- voice tutor (headless Claude Code) ----------------
-const tutor = new TutorBridge(tutorConfig(cfg), paths.root, path.join(paths.root, 'data', 'tutor'));
+const tutor = new TutorBridge(tutorConfig(cfg), paths.root, path.join(paths.root, 'data', 'tutor'), {
+  titleOf: (slug) => getProblem(db, slug).title,
+});
+tutor.adoptScope(
+  (db.prepare(`SELECT problem_slug AS slug FROM attempts WHERE status = 'in_progress' ORDER BY id DESC LIMIT 1`).get() as { slug: string } | undefined)?.slug ??
+    null,
+);
 
 /** Server-sent events: a snapshot on connect, then every tutor event. */
 app.get('/api/tutor/events', (req, res) => {
@@ -310,6 +325,86 @@ app.post(
     res.set({ 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' }).send(wav);
   }),
 );
+
+// ---------------- drill page (generated questions on a weakness) ----------------
+const drills = new DrillService(db, drillConfig(cfg), tutorConfig(cfg), () => getPrefs(db).track);
+setTimeout(() => drills.prepareNext(), 15_000); // have the suggested drill ready before it's needed
+
+/** Weaknesses you can drill, the suggested one, and whether a drill is ready for each. */
+app.get('/api/drills', (_req, res) => {
+  const track = getPrefs(db).track;
+  const focus = focusWeakness(db, track, 'drill');
+  const list = weaknessesWithExamples(db, track, ['active', 'improving']).map((w) => ({
+    id: w.id,
+    area: w.area,
+    description: w.description,
+    status: w.status,
+    timesObserved: w.timesObserved,
+    lastDrill: w.drills[0] ?? null,
+    ...drills.status(w.id),
+  }));
+  res.json({ suggested: focus?.weakness.id ?? null, weaknesses: list });
+});
+
+/** Start (or resume) a drill on a weakness; waits for generation if nothing is ready yet. */
+app.post(
+  '/api/drills/start',
+  wrap(async (req, res) => {
+    const id = Number(req.body?.weaknessId);
+    if (!Number.isInteger(id) || id <= 0) throw httpError(400, 'Body must include "weaknessId"');
+    try {
+      res.json(publicDrillSet(await drills.ensure(id)));
+    } catch (e) {
+      throw httpError(502, `Couldn't prepare the drill: ${(e as Error).message}`);
+    }
+  }),
+);
+
+app.get('/api/drills/:id', (req, res) => {
+  try {
+    res.json(publicDrillSet(getDrillSet(db, Number(req.params.id))));
+  } catch {
+    throw httpError(404, 'Drill not found');
+  }
+});
+
+/** Answer one question: multiple choice / spot-the-bug / exact matches are graded here, other typed answers by Claude. */
+app.post(
+  '/api/drills/:id/answer',
+  wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    const { index, answer } = req.body ?? {};
+    const set = getDrillSet(db, id);
+    const q = set.questions[Number(index)];
+    if (!q) throw httpError(400, 'Unknown question');
+    if (answer === undefined || answer === null || String(answer).trim() === '') throw httpError(400, 'Empty answer');
+    let graded = gradeLocally(q, answer);
+    if (!graded) {
+      try {
+        graded = await drills.grade(q as Extract<typeof q, { type: 'short' | 'fix' }>, String(answer).slice(0, 2000));
+      } catch (e) {
+        throw httpError(502, `Couldn't grade that answer: ${(e as Error).message}`);
+      }
+    }
+    try {
+      const saved = saveDrillAnswer(db, id, Number(index), graded);
+      res.json({ result: graded, question: q, set: publicDrillSet(saved) });
+    } catch (e) {
+      throw httpError(409, (e as Error).message);
+    }
+  }),
+);
+
+/** Finish: records the score on the weakness (practice only) and prepares the next drill in the background. */
+app.post('/api/drills/:id/finish', (req, res) => {
+  try {
+    const { set, drill } = finishDrillSet(db, Number(req.params.id), { sessionId: activeSession(db)?.id ?? null });
+    drills.prepareNext();
+    res.json({ drill, set: publicDrillSet(set) });
+  } catch (e) {
+    throw httpError(400, (e as Error).message);
+  }
+});
 
 // ---------------- local speech recognition (Whisper helper) ----------------
 const sttCfg = sttConfig(cfg);

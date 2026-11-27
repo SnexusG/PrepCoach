@@ -15,4 +15,7 @@ Start a tutoring session.
    If the user gave preferences in the arguments (`$ARGUMENTS`) or answers with new ones, apply them with
    `npx prep set --sheet <id> --difficulty <level>` (sheets: `npx prep sheets`).
 4. If there is an open (in-progress) attempt, ask whether to resume it or abandon it (`/abandon`).
-5. Mention any progression suggestion from the context in one line, then offer `/next`.
+5. Mention any progression suggestion from the context in one line, then offer a **2–3 minute warm-up drill**
+   on the "next to drill" weakness from the context ("Quick warm-up on operation costs, or straight to a
+   problem?") — in the web app point them to the Drill page (http://localhost:5173/drill), in the terminal run
+   `/drill`; otherwise `/next`.

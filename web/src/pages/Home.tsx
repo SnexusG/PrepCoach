@@ -59,6 +59,15 @@ function DsaCard({ data }: { data: Dashboard | null }) {
             {secondary.label}
           </button>
         )}
+        {!open && (data?.stats.weaknesses.active ?? 0) + (data?.stats.weaknesses.improving ?? 0) > 0 && (
+          <button
+            onClick={() => navigate('/drill')}
+            disabled={busy || !t.connected}
+            title="2–4 minutes of quick questions on one of your weaknesses (rotates)"
+          >
+            ⚡ Quick drill
+          </button>
+        )}
       </div>
       {!t.connected && <p className="muted small">Connecting to the tutor…</p>}
       {busy && <p className="muted small">The tutor is working — follow along on the right.</p>}

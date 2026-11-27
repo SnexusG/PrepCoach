@@ -28,14 +28,6 @@ export interface TopicStat {
   recentOutcomes: { difficulty: Difficulty; outcome: number }[];
 }
 
-export interface ActiveWeakness {
-  id: number;
-  topic: string | null;
-  description: string;
-  timesObserved: number;
-  lastSeen: string;
-}
-
 export interface DueReview {
   slug: string;
   dueDate: string;
@@ -44,7 +36,6 @@ export interface DueReview {
 export interface SelectionInput {
   problems: ProblemInfo[];
   topicStats: TopicStat[];
-  activeWeaknesses: ActiveWeakness[];
   /** Sorted by due date, oldest first. */
   dueReviews: DueReview[];
   reviewsServedThisSession: number;
@@ -56,7 +47,7 @@ export interface SelectionInput {
   extraReviews?: boolean;
 }
 
-export type SelectionKind = 'review' | 'weakness' | 'weak_topic' | 'sheet';
+export type SelectionKind = 'review' | 'weak_topic' | 'sheet';
 
 export interface Selection {
   slug: string;
@@ -153,22 +144,8 @@ export function selectNext(input: SelectionInput, cfg: PrepConfig): Selection | 
     return finish(p, 'sheet', `Next ${difficulty} in ${p.topic} (requested).${abandonedNote(p)}`);
   }
 
-  // 2a. Active weaknesses tied to a topic, most-observed first.
-  const weaknesses = input.activeWeaknesses
-    .filter((w) => w.topic)
-    .sort((a, b) => b.timesObserved - a.timesObserved || b.lastSeen.localeCompare(a.lastSeen));
-  for (const w of weaknesses) {
-    const p = firstInTopic(w.topic!);
-    if (p) {
-      return finish(
-        p,
-        'weakness',
-        `Targets your active weakness "${w.description}" (${w.topic}, seen ${w.timesObserved}×).${abandonedNote(p)}`,
-      );
-    }
-  }
-
-  // 2b. Lowest-rated attempted topic, if it is clearly weak.
+  // 2. Lowest-rated attempted topic, if it is clearly weak. (Weaknesses are general skill gaps that don't map to a
+  //    topic; the tutor works on them by probing and drills, not through problem choice.)
   const attempted = input.topicStats.filter((t) => t.attempts > 0);
   if (attempted.length) {
     const avg = attempted.reduce((s, t) => s + t.rating, 0) / attempted.length;
