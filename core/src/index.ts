@@ -7,6 +7,8 @@ export * from './weaknesses';
 export * from './attempts';
 export * from './activity';
 export * from './forecast';
+export * from './gamification';
+export * from './achievements';
 export * from './sttHelper';
 export * from './drills';
 export * from './catalog';

@@ -173,6 +173,14 @@ function Settings({ onClose }: { onClose: () => void }) {
         <input type="checkbox" checked={t.settings.micOffAfterTurn} onChange={(e) => t.updateSettings({ micOffAfterTurn: e.target.checked })} />
         Turn the mic off after each turn
       </label>
+      <label title="Little chimes when you solve, earn a badge or level up">
+        <input type="checkbox" checked={t.settings.rewardSounds} onChange={(e) => t.updateSettings({ rewardSounds: e.target.checked })} />
+        Reward sounds
+      </label>
+      <label title="Confetti and animations on level-ups and rare badges">
+        <input type="checkbox" checked={t.settings.rewardEffects} onChange={(e) => t.updateSettings({ rewardEffects: e.target.checked })} />
+        Reward animations
+      </label>
       <label title="How long you must pause before your turn is sent">
         Pause to send {(t.settings.pauseMs / 1000).toFixed(1)} s
         <input type="range" min={1000} max={4000} step={100} value={t.settings.pauseMs} onChange={(e) => t.updateSettings({ pauseMs: +e.target.value })} />

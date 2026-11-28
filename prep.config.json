@@ -18,10 +18,11 @@
     "hintNames": ["none", "nudge", "pattern", "approach", "full solution"],
     "confidence": { "lowAttempts": 3, "fullAttempts": 10, "minWeight": 0.1 },
     "labels": [
-      { "min": 0, "label": "Beginner" },
-      { "min": 1200, "label": "Developing" },
-      { "min": 1400, "label": "Interview-ready (mediums)" },
-      { "min": 1600, "label": "Strong" }
+      { "min": 0, "label": "Beginner", "meaning": "Learning the core patterns; easies are a stretch" },
+      { "min": 1200, "label": "Developing", "meaning": "Solves easies; mediums need help" },
+      { "min": 1400, "label": "Interview-ready", "meaning": "Solves mediums in interview time" },
+      { "min": 1600, "label": "Strong", "meaning": "Mediums with ease; hards within reach" },
+      { "min": 1800, "label": "Expert", "meaning": "Solves hards cleanly" }
     ]
   },
   "topics": {
@@ -94,6 +95,12 @@
     "mixedQuestions": 8,
     "generationModel": null,
     "gradingModel": "haiku"
+  },
+  "gamification": {
+    "streak": { "freezeEvery": 7, "maxFreezes": 2 },
+    "quests": { "daily": 3, "weekly": 2 },
+    "parMinutes": { "easy": 15, "medium": 30, "hard": 50 },
+    "topicMasterRating": 1400
   },
   "stt": {
     "engine": "whisper",

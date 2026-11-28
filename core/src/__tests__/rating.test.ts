@@ -155,7 +155,8 @@ describe('overall rating, confidence, labels', () => {
     expect(ratingLabel(1150, cfg)).toBe('Beginner');
     expect(ratingLabel(1200, cfg)).toBe('Developing');
     expect(ratingLabel(1399, cfg)).toBe('Developing');
-    expect(ratingLabel(1400, cfg)).toBe('Interview-ready (mediums)');
+    expect(ratingLabel(1400, cfg)).toBe('Interview-ready');
     expect(ratingLabel(1650, cfg)).toBe('Strong');
+    expect(ratingLabel(1800, cfg)).toBe('Expert');
   });
 });

@@ -10,6 +10,44 @@ import { focusWeakness, listDrills, listWeaknesses, type DrillRow, type Weakness
 import { problemFiles, sheetName } from './catalog';
 import { liveActiveTime } from './activity';
 import { activeTimeByDifficulty, getForecast, type ActiveTimeStat, type Forecast } from './forecast';
+import { getGame, weeklySolveTarget, type GameContext } from './gamification';
+
+/** Streaks, quests, badges for the current track; the weekly solve quest is sized from the forecast. */
+export function loadGame(db: DB, cfg: PrepConfig, now = new Date()): GameContext {
+  const prefs = getPrefs(db);
+  const f = getForecast(db, cfg, { sheet: prefs.sheet, track: prefs.track, now });
+  return getGame(db, cfg, prefs.track, weeklySolveTarget(f.perWeek, f.target?.requiredPerWeek ?? null), now);
+}
+
+/** A compact game summary (context, dashboard). */
+export interface GameSummary {
+  streak: number;
+  longestStreak: number;
+  freezes: number;
+  activeToday: boolean;
+  questsDone: number;
+  questsTotal: number;
+  badges: number;
+  badgesTotal: number;
+  latestBadge: { name: string; icon: string; at: string } | null;
+}
+
+export function gameSummary(g: GameContext): GameSummary {
+  const s = g.state;
+  const quests = [...s.quests.daily, ...s.quests.weekly];
+  const unlocked = s.achievements.filter((a) => a.unlockedAt).sort((a, b) => b.unlockedAt!.localeCompare(a.unlockedAt!));
+  return {
+    streak: s.streak.current,
+    longestStreak: s.streak.longest,
+    freezes: s.streak.freezes,
+    activeToday: s.streak.activeToday,
+    questsDone: quests.filter((q) => q.done).length,
+    questsTotal: quests.length,
+    badges: unlocked.length,
+    badgesTotal: s.achievements.length,
+    latestBadge: unlocked[0] ? { name: unlocked[0].name, icon: unlocked[0].icon, at: unlocked[0].unlockedAt! } : null,
+  };
+}
 
 export interface Prefs {
   sheet: string;
@@ -382,6 +420,8 @@ export interface ContextData {
   reviewsDue: ReviewItem[];
   reviewsUpcoming: ReviewItem[];
   suggestions: string[];
+  game: GameSummary;
+  quests: string[];
 }
 
 export function getContext(db: DB, cfg: PrepConfig, now = new Date()): ContextData {
@@ -389,6 +429,8 @@ export function getContext(db: DB, cfg: PrepConfig, now = new Date()): ContextDa
   const stats = getStats(db, cfg, now);
   const reviews = listReviews(db, now, { withinDays: 7 });
   const next = nextProblem(db, cfg, { now });
+  const game = loadGame(db, cfg, now);
+  const q = game.state.quests;
   return {
     date: toDateString(now),
     prefs,
@@ -403,6 +445,8 @@ export function getContext(db: DB, cfg: PrepConfig, now = new Date()): ContextDa
     reviewsDue: reviews.filter((r) => r.due),
     reviewsUpcoming: reviews.filter((r) => !r.due),
     suggestions: next.selection?.suggestions ?? [],
+    game: gameSummary(game),
+    quests: [...q.daily, ...q.weekly].map((x) => `${x.done ? '✓' : '·'} ${x.title} (${x.progress}/${x.goal})`),
   };
 }
 
@@ -455,6 +499,12 @@ export function renderContextMarkdown(c: ContextData): string {
     (d) => `${d} ${s.activeTime[d].avgMinutes} min (${s.activeTime[d].attempts})`,
   );
   if (times.length) L.push(`Average active time per solve: ${times.join(', ')}`);
+  const g = c.game;
+  L.push(
+    `Streak: ${g.streak} day${g.streak === 1 ? '' : 's'}${g.activeToday ? '' : ' (nothing yet today)'}${g.freezes ? ` · ${g.freezes} freeze${g.freezes === 1 ? '' : 's'}` : ''}` +
+      ` · Quests ${g.questsDone}/${g.questsTotal}: ${c.quests.join('; ')}` +
+      ` · Badges ${g.badges}/${g.badgesTotal}${g.latestBadge ? ` (latest ${g.latestBadge.name})` : ''}`,
+  );
   L.push('');
 
   const attempted = s.topics.filter((t) => t.attempts > 0).sort((a, b) => a.rating - b.rating);

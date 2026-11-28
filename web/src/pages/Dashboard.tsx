@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { dashApi, fmtDate, fmtDelta, fmtMins, WEAKNESS_AREA_LABELS, type Dashboard as DashData, type Difficulty, type TopicStat } from '../api';
+import { dashApi, fmtDate, fmtDelta, fmtMins, WEAKNESS_AREA_LABELS, type Dashboard as DashData, type Difficulty, type RatingLevel, type TopicStat } from '../api';
 import ForecastCard from '../components/ForecastCard';
+import LevelScale, { levelColor, levelIndex } from '../components/LevelScale';
 import NavBar from '../components/NavBar';
 import TutorPanel from '../components/TutorPanel';
 import { useTutor } from '../tutor/TutorContext';
@@ -119,7 +120,7 @@ function RatingChart({ data }: { data: DashData }) {
 
 // ---------------------------------------------------------------- topic ratings (diverging from the start)
 
-function TopicBars({ topics, initial }: { topics: TopicStat[]; initial: number }) {
+function TopicBars({ topics, initial, levels }: { topics: TopicStat[]; initial: number; levels: RatingLevel[] }) {
   const attempted = topics.filter((t) => t.attempts > 0).sort((a, b) => a.rating - b.rating);
   const untouched = topics.filter((t) => t.attempts === 0);
   const span = Math.max(50, ...attempted.map((t) => Math.abs(t.rating - initial)));
@@ -150,6 +151,7 @@ function TopicBars({ topics, initial }: { topics: TopicStat[]; initial: number }
                 />
               </span>
               <span className="dbar-value">
+                <span className="lvl-dot" style={{ background: levelColor(levelIndex(t.rating, levels), levels.length) }} title={t.label} />{' '}
                 {Math.round(t.rating)} <span className="muted">{fmtDelta(d)}</span>
               </span>
               <span className={`conf ${t.lowConfidence ? 'low' : ''}`}>
@@ -373,9 +375,19 @@ export default function Dashboard() {
           {data && (
             <>
               <div className="kpis">
-                <Tile label="DSA rating" sub={<><Trend d={data.stats.overall.trend7d} span="7d" /> <Trend d={data.stats.overall.trend30d} span="30d" /></>}>
+                <Tile
+                  label="DSA rating"
+                  sub={
+                    <>
+                      <Trend d={data.stats.overall.trend7d} span="7d" /> <Trend d={data.stats.overall.trend30d} span="30d" />
+                      <LevelScale rating={data.stats.overall.rating} levels={data.labels} />
+                    </>
+                  }
+                >
                   <span className="hero">{Math.round(data.stats.overall.rating * 10) / 10}</span>
-                  <span className="hero-label">{data.stats.overall.label}</span>
+                  <span className="hero-label" style={{ color: levelColor(levelIndex(data.stats.overall.rating, data.labels), data.labels.length) }}>
+                    {data.stats.overall.label}
+                  </span>
                 </Tile>
                 <Tile label="Solved" sub={<Meter value={data.stats.completion.solved} total={data.stats.completion.total} />}>
                   {data.stats.completion.solved}
@@ -396,7 +408,7 @@ export default function Dashboard() {
 
               <div className="grid2">
                 <RatingChart data={data} />
-                <TopicBars topics={data.stats.topics} initial={data.initialRating} />
+                <TopicBars topics={data.stats.topics} initial={data.initialRating} levels={data.labels} />
               </div>
               <div className="grid2">
                 <Weaknesses data={data} />

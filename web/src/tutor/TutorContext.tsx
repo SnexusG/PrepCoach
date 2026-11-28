@@ -33,6 +33,9 @@ export interface VoiceSettings {
   sttEngine: SttEngine;
   /** Turn the mic off once each spoken turn is sent (click the mic to talk again), instead of listening hands-free. */
   micOffAfterTurn: boolean;
+  /** Reward moment: little synthesized sounds, and confetti/animations (also off with reduced motion). */
+  rewardSounds: boolean;
+  rewardEffects: boolean;
 }
 
 const DEFAULT_SETTINGS: VoiceSettings = {
@@ -45,6 +48,8 @@ const DEFAULT_SETTINGS: VoiceSettings = {
   pauseMs: 1800,
   chatInVoice: false,
   micOffAfterTurn: false,
+  rewardSounds: true,
+  rewardEffects: true,
 };
 
 interface TutorApi {
@@ -224,6 +229,16 @@ export function TutorProvider({ children }: { children: ReactNode }) {
     whisper.stop();
   }, [listener, whisper]);
   stopMicRef.current = stopMic;
+
+  // The mic fell back to the browser while Whisper was loading: hand over once Whisper is ready
+  // (starting Whisper clears the fallback notice through onActiveChange).
+  useEffect(() => {
+    if (settings.sttEngine !== 'whisper' || sttStatus?.state !== 'ready') return;
+    if (sttInUse !== 'browser' || !listener.active) return;
+    listener.stop();
+    setSttInUse('whisper');
+    whisper.start(sttStatus);
+  }, [sttStatus, sttInUse, settings.sttEngine, listener, whisper]);
 
   useEffect(() => {
     speaker.onSpeakingChange = setSpeaking;

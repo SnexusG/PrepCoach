@@ -197,6 +197,12 @@ export interface Forecast {
   history: { date: string; solved: number }[];
 }
 
+export interface RatingLevel {
+  min: number;
+  label: string;
+  meaning?: string;
+}
+
 export interface Dashboard {
   stats: {
     prefs: { sheet: string; sheetName: string; difficulty: Difficulty };
@@ -211,7 +217,8 @@ export interface Dashboard {
     activeTime: Record<Difficulty, { avgMinutes: number | null; attempts: number }>;
   };
   initialRating: number;
-  labels: { min: number; label: string }[];
+  labels: RatingLevel[];
+  game: (GameSummary & { quests: Quest[]; weeklyCount: number }) | null;
   weaknesses: Weakness[];
   reviews: ReviewItem[];
   recent: AttemptSummary[];
@@ -227,6 +234,84 @@ export interface AttemptDetail extends AttemptSummary {
   notes: string | null;
   solution: string | null;
 }
+
+// ---------------- game (streaks, quests, badges) ----------------
+
+export interface Quest {
+  id: string;
+  title: string;
+  progress: number;
+  goal: number;
+  done: boolean;
+  doneAt: string | null;
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  rarity: 'common' | 'rare' | 'epic';
+  unlockedAt: string | null;
+  progress: [number, number] | null;
+}
+
+export interface GameSummary {
+  streak: number;
+  longestStreak: number;
+  freezes: number;
+  activeToday: boolean;
+  questsDone: number;
+  questsTotal: number;
+  badges: number;
+  badgesTotal: number;
+  latestBadge: { name: string; icon: string; at: string } | null;
+}
+
+export interface GameState {
+  summary: GameSummary;
+  streak: { current: number; longest: number; freezes: number; activeToday: boolean; frozenDays: string[] };
+  heatmap: { date: string; solves: number; attempts: number; drills: number }[];
+  quests: { daily: Quest[]; weekly: Quest[] };
+  achievements: Achievement[];
+  bests: {
+    fastest: Record<Difficulty, { slug: string; title: string; activeSec: number; at: string } | null>;
+    bestOutcome: { slug: string; title: string; outcome: number; at: string } | null;
+    longestStreak: number;
+  };
+  levels: { label: string; min: number; meaning?: string; reachedAt: string | null }[];
+}
+
+export interface Rewards {
+  since: string;
+  until: string;
+  solves: {
+    attemptId: number;
+    slug: string;
+    title: string;
+    difficulty: Difficulty;
+    solved: boolean;
+    isReview: boolean;
+    outcome: number | null;
+    changes: { topic: string; before: number; after: number; isPrimary: boolean }[];
+  }[];
+  overall: { before: number; after: number } | null;
+  levelUp: { from: string; to: string; meaning?: string } | null;
+  badges: Achievement[];
+  quests: Quest[];
+  streak: { current: number; extended: boolean; freezes: number };
+  bests: { kind: string; text: string }[];
+  drills: number;
+  empty: boolean;
+  levels: RatingLevel[];
+}
+
+export const gameApi = {
+  state: () => call<GameState>('/api/game'),
+  summary: () => call<GameSummary & { rating: number; label: string; levels: RatingLevel[] }>('/api/game/summary'),
+  pending: () => call<Rewards>('/api/rewards/pending'),
+  ack: (through: string) => call<{ ok: true }>('/api/rewards/ack', { method: 'POST', body: JSON.stringify({ through }) }),
+};
 
 export const dashApi = {
   dashboard: () => call<Dashboard>('/api/dashboard'),

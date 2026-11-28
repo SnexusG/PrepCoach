@@ -18,7 +18,7 @@ Changing rating constants affects **future** attempts only; past rating changes 
 | `hintCaps` | 1, 0.85, 0.7, 0.5, 0.25 | max outcome after hint level 0–4 (non-increasing, 5 entries) |
 | `hintNames` | none, nudge, pattern, approach, full solution | display names of hint levels |
 | `confidence.lowAttempts` / `fullAttempts` / `minWeight` | 3 / 10 / 0.1 | topics with < 3 attempts are flagged low-confidence; confidence weight ramps to 1 at 10 attempts (used for the overall rating) |
-| `labels` | Beginner 0 · Developing 1200 · Interview-ready (mediums) 1400 · Strong 1600 | rating labels (ascending `min`) |
+| `labels` | Beginner 0 · Developing 1200 · Interview-ready 1400 · Strong 1600 · Expert 1800 | rating levels (ascending `min`), each with an optional one-line `meaning` shown on the dashboard's level scale |
 
 ## `topics`
 Per track, the topics and their `frequencyWeight` (how often they show up in interviews). The overall rating is a
@@ -84,6 +84,15 @@ Voice, speed and pause length are per-browser settings in the tutor panel (⚙),
 | `mixedQuestions` | 8 | questions in an "all weaknesses" drill (3–15), spread over your open weaknesses, least recently drilled first; each weakness gets its own recorded score |
 | `generationModel` | `null` | model that writes the questions from your weakness and its noted slips (`null` = your Claude Code default). A set takes ~20–60 s, so the next drill is prepared in the background |
 | `gradingModel` | `haiku` | model that judges typed answers that don't match the expected answer exactly (a few seconds each) |
+
+## `gamification` (streaks, quests, badges)
+Optional; everything is derived from history, so changing these re-scores the past. Elo is not affected.
+| Key | Default | Meaning |
+|---|---|---|
+| `streak.freezeEvery` / `maxFreezes` | 7 / 2 | a streak freeze is earned every 7 active days in a row (at most 2 banked); one is spent automatically on a missed day |
+| `quests.daily` / `weekly` | 3 / 2 | quests per day (always includes "solve a problem") and per week (always includes "solve N", sized from your forecast) |
+| `parMinutes` | easy 15, medium 30, hard 50 | active minutes for the "under par" quest; the Speedrunner badge is a medium in half of par |
+| `topicMasterRating` | 1400 | topic rating for the Topic Master badge (with 5 solves in that topic) |
 
 ## `stt` (speech recognition in voice mode)
 | Key | Default | Meaning |

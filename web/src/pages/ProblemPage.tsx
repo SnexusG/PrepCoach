@@ -316,7 +316,7 @@ export default function ProblemPage() {
 
   return (
     <div className="problem-page">
-      <NavBar>
+      <NavBar game={false}>
         <h1>{problem.title}</h1>
         <span className={`badge ${problem.difficulty}`}>{problem.difficulty}</span>
         <span className="muted topic">{[problem.topic, ...problem.secondaryTopics].join(' · ')}</span>

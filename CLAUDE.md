@@ -156,6 +156,7 @@ weakness merge <ids…> --into <id> [--description "…"] [--area <area>]
 drill record <weaknessId> --score 4/5 [--note "what they missed"]   (practice; doesn't change weakness status)
 weakness update <id> [--status active|improving|resolved] [--description "…" [--generalize]] [--area <area>] [--topic <t>|none]
 weakness observe --weakness "…" | --seen "ID: slip" | --handled "ID: what went right"
+game                                     streak, quests, badges, personal bests (fun layer; Elo unaffected)
 reviews [--all] · stats · problem <slug> · sheets · set --sheet <id> --difficulty <level> [--target-date YYYY-MM-DD|none] · backup
 ```
 Run `npx prep` via the **Bash** tool (the slash commands pre-approve `Bash(npx prep:*)`). Prefer the `k=v`

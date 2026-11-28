@@ -1,7 +1,9 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { dashApi, fmtDate, fmtDay, forecastHeadline, type Dashboard } from '../api';
+import LevelScale, { levelColor, levelIndex } from '../components/LevelScale';
 import NavBar from '../components/NavBar';
 import TutorPanel from '../components/TutorPanel';
+import { QuestList } from './Trophies';
 import { useTutor } from '../tutor/TutorContext';
 import { usePolling } from '../usePolling';
 
@@ -46,51 +48,119 @@ function DsaCard({ data }: { data: Dashboard | null }) {
   }
 
   return (
-    <section className="home-hero">
-      <div className="home-track">DSA · Java 17</div>
-      <h1>{title}</h1>
-      <p className="home-lead">{lead}</p>
-      <div className="home-cta">
-        <button className="cta" onClick={primary.run} disabled={busy || !t.connected}>
-          {primary.label}
-        </button>
-        {secondary && (
-          <button onClick={secondary.run} disabled={busy || !t.connected}>
-            {secondary.label}
+    <>
+      <section className="home-hero">
+        <div className="home-track">
+          DSA · Java 17
+          {data && (
+            <span className="home-sheet">
+              {data.stats.prefs.sheetName} · {data.stats.prefs.difficulty}
+            </span>
+          )}
+        </div>
+        <h1>{title}</h1>
+        <p className="home-lead">{lead}</p>
+        <div className="home-cta">
+          <button className="cta" onClick={primary.run} disabled={busy || !t.connected}>
+            {primary.label}
           </button>
-        )}
-        {!open && (data?.stats.weaknesses.active ?? 0) + (data?.stats.weaknesses.improving ?? 0) > 0 && (
-          <button
-            onClick={() => navigate('/drill?mixed=1')}
-            disabled={busy || !t.connected}
-            title="Mixed practice: quick questions across your focus areas"
-          >
-            ⚡ Quick drill
-          </button>
-        )}
+          {secondary && (
+            <button onClick={secondary.run} disabled={busy || !t.connected}>
+              {secondary.label}
+            </button>
+          )}
+          {!open && (data?.stats.weaknesses.active ?? 0) + (data?.stats.weaknesses.improving ?? 0) > 0 && (
+            <button
+              className="ghost"
+              onClick={() => navigate('/drill?mixed=1')}
+              disabled={busy || !t.connected}
+              title="Mixed practice: quick questions across your focus areas"
+            >
+              ⚡ Quick drill
+            </button>
+          )}
+        </div>
+        {!t.connected && <p className="home-status">Connecting to the tutor…</p>}
+        {busy && <p className="home-status">The tutor is working — follow along on the right.</p>}
+      </section>
+      {data && <ProgressCard data={data} />}
+    </>
+  );
+}
+
+/** Where you stand: rating and level, the three numbers that matter, and the finish forecast. */
+function ProgressCard({ data }: { data: Dashboard }) {
+  const { overall, completion, reviews, weaknesses } = data.stats;
+  const game = data.game;
+  const levels = data.labels;
+  const idx = levelIndex(overall.rating, levels);
+  const color = levelColor(idx, levels.length);
+  const pct = completion.total ? (100 * completion.solved) / completion.total : 0;
+
+  return (
+    <section className="home-progress">
+      <div className="home-rating">
+        <div className="home-rating-num">
+          <span className="home-rating-value">{Math.round(overall.rating)}</span>
+          <span className="home-rating-level" style={{ color }}>
+            {overall.label}
+          </span>
+          {levels[idx]?.meaning && <span className="home-rating-meaning">{levels[idx].meaning}</span>}
+        </div>
+        <LevelScale rating={overall.rating} levels={levels} compact />
       </div>
-      {!t.connected && <p className="muted small">Connecting to the tutor…</p>}
-      {busy && <p className="muted small">The tutor is working — follow along on the right.</p>}
-      {data && <ForecastLine data={data} />}
-      {data && (
-        <div className="home-facts">
-          <span>
-            Sheet <b>{data.stats.prefs.sheetName}</b> · {data.stats.prefs.difficulty}
+
+      <div className="home-stats">
+        {game && (
+          <Link to="/trophies" className={`home-stat streak ${game.activeToday ? 'lit' : ''}`}>
+            <span className="home-stat-label">Streak</span>
+            <span className="home-stat-value">
+              <span className="home-flame">🔥</span>
+              {game.streak}
+              <span className="home-stat-of"> day{game.streak === 1 ? '' : 's'}</span>
+            </span>
+            <span className="home-stat-sub">{game.activeToday ? 'done for today ✓' : game.streak ? 'practise today to keep it' : 'solve one to start'}</span>
+          </Link>
+        )}
+        <Link to="/dashboard" className="home-stat">
+          <span className="home-stat-label">Solved</span>
+          <span className="home-stat-value">
+            {completion.solved}
+            <span className="home-stat-of"> / {completion.total}</span>
           </span>
-          <span>
-            Rating <b>{Math.round(data.stats.overall.rating)}</b> <span className="muted">({data.stats.overall.label})</span>
+          <span className="meter">
+            <span className="meter-fill" style={{ width: `${pct}%`, display: 'block' }} />
           </span>
-          <span>
-            <b>{data.stats.reviews.due}</b> review{data.stats.reviews.due === 1 ? '' : 's'} due
+        </Link>
+        <Link to="/dashboard" className="home-stat">
+          <span className="home-stat-label">Reviews due</span>
+          <span className="home-stat-value">{reviews.due}</span>
+          <span className="home-stat-sub">{reviews.upcoming7d} more this week</span>
+        </Link>
+        <Link to="/dashboard" className="home-stat">
+          <span className="home-stat-label">Weaknesses</span>
+          <span className="home-stat-value">{weaknesses.active}</span>
+          <span className="home-stat-sub">
+            active · {weaknesses.improving} improving
           </span>
-          <span>
-            <b>{data.stats.weaknesses.active}</b> active weakness{data.stats.weaknesses.active === 1 ? '' : 'es'}
-          </span>
-          <span>
-            <b>{data.stats.completion.solved}</b>/{data.stats.completion.total} solved
-          </span>
+        </Link>
+      </div>
+
+      {game && game.quests.length > 0 && (
+        <div className="home-quests">
+          <div className="home-quests-head">
+            <span className="home-stat-label">Today’s quests</span>
+            <Link to="/trophies" className="small">
+              {game.badges}/{game.badgesTotal} badges →
+            </Link>
+          </div>
+          <QuestList quests={game.quests.slice(0, game.quests.length - game.weeklyCount)} compact />
+          <div className="home-stat-label home-week-label">This week</div>
+          <QuestList quests={game.quests.slice(game.quests.length - game.weeklyCount)} compact />
         </div>
       )}
+
+      <ForecastLine data={data} />
     </section>
   );
 }
@@ -99,20 +169,22 @@ function DsaCard({ data }: { data: Dashboard | null }) {
 function ForecastLine({ data }: { data: Dashboard }) {
   const f = data.stats.forecast;
   const t = f.target;
+  const showGoal = t && !t.passed && f.status !== 'complete';
   return (
-    <p className="home-forecast">
-      <span>{forecastHeadline(f, data.stats.prefs.sheetName)}</span>
-      {f.status === 'ok' && <span className="muted"> ({f.perWeek} a week)</span>}
-      {t && !t.passed && f.status !== 'complete' && (
-        <span className={t.onTrack ? 'st solved' : 'st partial'}>
-          {' '}
-          · goal {fmtDay(t.date)}: {t.onTrack ? 'on track' : t.onTrack === false ? `behind, needs ${t.requiredPerWeek}/week` : `needs ${t.requiredPerWeek}/week`}
+    <div className="home-forecast">
+      <span className="home-forecast-text">
+        {forecastHeadline(f, data.stats.prefs.sheetName)}
+        {f.status === 'ok' && <span className="muted"> · {f.perWeek}/week</span>}
+      </span>
+      {showGoal && (
+        <span className={`goal-pill ${t.onTrack ? 'ok' : t.onTrack === false ? 'behind' : ''}`}>
+          Goal {fmtDay(t.date)}: {t.onTrack ? 'on track' : `needs ${t.requiredPerWeek}/week`}
         </span>
-      )}{' '}
-      <Link to="/dashboard" className="small">
+      )}
+      <Link to="/dashboard" className="home-forecast-link">
         Forecast →
       </Link>
-    </p>
+    </div>
   );
 }
 

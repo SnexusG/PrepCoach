@@ -50,6 +50,11 @@ import {
   tagProblem,
   updateWeakness,
   weaknessesWithExamples,
+  getAttempt,
+  loadGame,
+  gameSummary,
+  rewardsSince,
+  rewardLine,
   mergeWeaknesses,
   focusWeakness,
   recordDrill,
@@ -352,7 +357,11 @@ program
       testsPassed: o.testsPassed,
       testsTotal: o.testsTotal,
     });
-    out(r, () => {
+    // What this attempt unlocked (streak, badges, quests, level-up, personal bests): celebrated by the tutor.
+    const finishedAt = getAttempt(db(), r.attemptId).finishedAt!;
+    const game = loadGame(db(), cfg);
+    const rewards = rewardsSince(db(), game.history, game.state, cfg, new Date(Date.parse(finishedAt) - 1).toISOString(), new Date());
+    out({ ...r, rewards }, () => {
       const p = r.changes.find((c) => c.isPrimary);
       const L = [
         `Recorded attempt #${r.attemptId} on ${slug}${r.isReview ? ' (review)' : ''}: outcome ${r.outcome.score.toFixed(2)}` +
@@ -378,6 +387,37 @@ program
       for (const w of r.weaknesses) {
         L.push(`Weakness #${w.id} "${w.description}": ${w.action} → ${w.status} (seen ${w.timesObserved}×, clean ${w.cleanDemonstrations}×)`);
       }
+      const line = rewardLine(rewards);
+      if (line) L.push(`Rewards: ${line}`);
+      return L;
+    });
+  });
+
+// ---------------- game ----------------
+program
+  .command('game')
+  .description('streak, quests, badges and personal bests (derived from history; Elo is unaffected)')
+  .action(() => {
+    const g = loadGame(db(), cfg);
+    const s = g.state;
+    const sum = gameSummary(g);
+    out({ summary: sum, ...s, heatmap: undefined }, () => {
+      const L = [
+        `Streak ${sum.streak} (longest ${sum.longestStreak})${sum.freezes ? ` · ${sum.freezes} freeze(s) banked` : ''}${sum.activeToday ? ' · active today' : ' · nothing yet today'}`,
+        'Quests:',
+        ...[...s.quests.daily, ...s.quests.weekly].map((q) => `  ${q.done ? '✓' : '·'} ${q.title} (${q.progress}/${q.goal})`),
+        `Badges ${sum.badges}/${sum.badgesTotal}:`,
+        ...s.achievements.map(
+          (a) => `  ${a.unlockedAt ? a.icon : '🔒'} ${a.name} — ${a.description}${a.unlockedAt ? ` (${a.unlockedAt.slice(0, 10)})` : a.progress ? ` [${a.progress[0]}/${a.progress[1]}]` : ''}`,
+        ),
+        'Personal bests:',
+        ...DIFFICULTIES.map((d) => {
+          const b = s.bests.fastest[d];
+          return `  fastest ${d}: ${b ? `${Math.round(b.activeSec / 60)} min (${b.title})` : '—'}`;
+        }),
+        `  best score: ${s.bests.bestOutcome ? `${s.bests.bestOutcome.outcome.toFixed(2)} (${s.bests.bestOutcome.title})` : '—'}`,
+        `Levels: ${s.levels.map((l) => `${l.label}${l.reachedAt ? ` ✓ ${l.reachedAt.slice(0, 10)}` : ''}`).join(' → ')}`,
+      ];
       return L;
     });
   });

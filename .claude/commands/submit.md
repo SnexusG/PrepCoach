@@ -31,6 +31,10 @@ Review and record the user's solution. Arguments: `$ARGUMENTS`
    since you needed the pattern hint"). Only struggles are reviewed: say "no review needed" for a clean solve, and
    "that one's off your review list" when the CLI says it graduated.
    Mention weakness status changes briefly.
+   If the CLI printed a `Rewards:` line (streak, badges, quests, level up, personal bests), celebrate it in **one**
+   upbeat sentence using exactly what it says, e.g. "That's a 5-day streak, and you just earned Clean Sheet!".
+   A level up ("level up: Interview-ready!") deserves a little more enthusiasm. The web app shows its own animation,
+   so don't describe it.
 6. **Append takeaways** to `problems/<slug>/notes.md`: date, outcome, approach used, complexity, mistakes,
    key insight, follow-up answers — 4–6 bullets.
 7. Offer `/next` (or `/end`).

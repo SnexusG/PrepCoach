@@ -32,6 +32,12 @@ import {
   focusWeakness,
   getPrefs,
   tutorConfig,
+  loadGame,
+  gameSummary,
+  pendingRewards,
+  ackRewards,
+  computeOverallRating,
+  ratingLabel,
   type AttemptRow,
 } from '@prepcoach/core';
 import { TutorBridge, type TutorEvent } from './tutor';
@@ -190,6 +196,7 @@ app.post(
 /** Everything the dashboard shows, in one call (cheap: a handful of indexed SQLite queries). */
 app.get('/api/dashboard', (_req, res) => {
   const stats = getStats(db, cfg);
+  const game = stats.track === 'dsa' ? loadGame(db, cfg) : null;
   const tracks = db.prepare('SELECT id, name, enabled FROM tracks ORDER BY rowid').all() as { id: string; name: string; enabled: number }[];
   res.json({
     stats: {
@@ -203,7 +210,34 @@ app.get('/api/dashboard', (_req, res) => {
     recent: listAttempts(db, { track: stats.track, limit: 8, cfg }),
     session: activeSession(db) ?? null,
     tracks: tracks.map((t) => ({ ...t, enabled: !!t.enabled })),
+    game: game ? { ...gameSummary(game), quests: [...game.state.quests.daily, ...game.state.quests.weekly], weeklyCount: game.state.quests.weekly.length } : null,
   });
+});
+
+// ---------------- game: streaks, quests, badges, rewards ----------------
+
+app.get('/api/game', (_req, res) => {
+  const g = loadGame(db, cfg);
+  res.json({ summary: gameSummary(g), ...g.state });
+});
+
+/** The nav bar chip: streak, quests, badges and the overall Elo level. */
+app.get('/api/game/summary', (_req, res) => {
+  const track = getPrefs(db).track;
+  const rating = computeOverallRating(db, cfg, track);
+  res.json({ ...gameSummary(loadGame(db, cfg)), rating, label: ratingLabel(rating, cfg), levels: cfg.rating.labels });
+});
+
+/** What hasn't been celebrated yet (the reward overlay polls this). */
+app.get('/api/rewards/pending', (_req, res) => {
+  res.json({ ...pendingRewards(db, cfg, loadGame(db, cfg)), levels: cfg.rating.labels });
+});
+
+app.post('/api/rewards/ack', (req, res) => {
+  const through = String(req.body?.through ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(through)) return res.status(400).json({ error: 'through must be an ISO timestamp' });
+  ackRewards(db, through);
+  res.json({ ok: true });
 });
 
 app.get('/api/attempts', (_req, res) => {

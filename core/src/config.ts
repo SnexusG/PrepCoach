@@ -30,7 +30,8 @@ export interface PrepConfig {
     hintCaps: number[];
     hintNames: string[];
     confidence: { lowAttempts: number; fullAttempts: number; minWeight: number };
-    labels: { min: number; label: string }[];
+    /** Rating levels, ascending `min`; `meaning` is a one-line description shown in the UI. */
+    labels: { min: number; label: string; meaning?: string }[];
   };
   topics: Record<Track, TopicConfig[]>;
   spacedRepetition: {
@@ -64,6 +65,8 @@ export interface PrepConfig {
   stt?: Partial<SttConfig>;
   /** Drill page (generated questions on a weakness). Optional; defaults below. */
   drill?: Partial<DrillConfig>;
+  /** Streaks, quests and badges. Optional; defaults below. */
+  gamification?: Partial<GamificationConfig>;
 }
 
 export interface DrillConfig {
@@ -75,6 +78,35 @@ export interface DrillConfig {
   generationModel: string | null;
   /** Model that grades typed answers (small and fast is fine). */
   gradingModel: string | null;
+}
+
+export interface GamificationConfig {
+  /** A streak freeze is earned every `freezeEvery` active days in a row (at most `maxFreezes` banked); one is spent per missed day. */
+  streak: { freezeEvery: number; maxFreezes: number };
+  /** How many daily and weekly quests to offer. */
+  quests: { daily: number; weekly: number };
+  /** "Par" active minutes per difficulty, for the under-par quest; Speedrunner is a medium in half of par. */
+  parMinutes: Record<Difficulty, number>;
+  /** Topic rating for the Topic Master badge (with 5 solves in the topic). */
+  topicMasterRating: number;
+}
+
+export const DEFAULT_GAMIFICATION_CONFIG: GamificationConfig = {
+  streak: { freezeEvery: 7, maxFreezes: 2 },
+  quests: { daily: 3, weekly: 2 },
+  parMinutes: { easy: 15, medium: 30, hard: 50 },
+  topicMasterRating: 1400,
+};
+
+export function gamificationConfig(cfg: PrepConfig): GamificationConfig {
+  const g = cfg.gamification ?? {};
+  const d = DEFAULT_GAMIFICATION_CONFIG;
+  return {
+    streak: { ...d.streak, ...(g.streak ?? {}) },
+    quests: { ...d.quests, ...(g.quests ?? {}) },
+    parMinutes: { ...d.parMinutes, ...(g.parMinutes ?? {}) },
+    topicMasterRating: g.topicMasterRating ?? d.topicMasterRating,
+  };
 }
 
 export const DEFAULT_DRILL_CONFIG: DrillConfig = { questions: 5, mixedQuestions: 8, generationModel: null, gradingModel: 'haiku' };
@@ -241,6 +273,12 @@ export function validateConfig(cfg: PrepConfig): void {
   if (dr.mixedQuestions !== undefined && !(Number.isInteger(dr.mixedQuestions) && dr.mixedQuestions >= 3 && dr.mixedQuestions <= 15)) {
     errors.push('drill.mixedQuestions must be an integer 3–15');
   }
+  const gm = gamificationConfig(cfg);
+  if (!(Number.isInteger(gm.streak.freezeEvery) && gm.streak.freezeEvery >= 1)) errors.push('gamification.streak.freezeEvery must be an integer >= 1');
+  if (!(Number.isInteger(gm.streak.maxFreezes) && gm.streak.maxFreezes >= 0)) errors.push('gamification.streak.maxFreezes must be an integer >= 0');
+  if (!(Number.isInteger(gm.quests.daily) && gm.quests.daily >= 1 && gm.quests.daily <= 6)) errors.push('gamification.quests.daily must be an integer 1–6');
+  if (!(Number.isInteger(gm.quests.weekly) && gm.quests.weekly >= 1 && gm.quests.weekly <= 4)) errors.push('gamification.quests.weekly must be an integer 1–4');
+  for (const d of DIFFICULTIES) if (!(gm.parMinutes[d] > 0)) errors.push(`gamification.parMinutes.${d} must be > 0`);
   const s = cfg.stt ?? {};
   if (s.engine && !['whisper', 'browser'].includes(s.engine)) errors.push('stt.engine must be "whisper" or "browser"');
   if (s.device && !['auto', 'cuda', 'cpu'].includes(s.device)) errors.push('stt.device must be "auto", "cuda" or "cpu"');
